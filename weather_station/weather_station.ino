@@ -29,7 +29,7 @@
 #include <Adafruit_BME280.h>
 
 #include <SPI.h>
-#include <SD.h>
+#include <LittleFS.h>
 #include <ArduinoOTA.h>
 #include <pgmspace.h>
 
@@ -75,8 +75,8 @@ namespace BME280Config {
 // PMS5003 Air Quality Sensor (UART)
 namespace PMS5003Config {
   static constexpr bool     ENABLE = true;
-  static constexpr int      RX_PIN = 4;
-  static constexpr int      TX_PIN = 5;  // Not used, but required for Serial2.begin()
+  static constexpr int      RX_PIN = 20;
+  static constexpr int      TX_PIN = 21;  // Not used, but required for Serial2.begin()
   static constexpr uint32_t POLL_INTERVAL_MS = 2000;  // Poll every 2 seconds
 }
 
@@ -100,12 +100,6 @@ namespace PMS5003Config {
 #define AQI_STANDARD 1  // 0=EPA, 1=Australian
 
 #endif
-
-// SD Card (SPI)
-namespace SDConfig {
-  static constexpr bool ENABLE = true;
-  static constexpr int  CS_PIN = 20;
-}
 
 // Data Logging
 namespace LogConfig {
@@ -554,15 +548,15 @@ time_t subtractDaysLocalMidnight(time_t tMidnightLocal, int days) {
 
 bool ensureDir(const char* path) {
   if (!gSdOk) return false;
-  if (SD.exists(path)) return true;
-  return SD.mkdir(path);
+  if (LittleFS.exists(path)) return true;
+  return LittleFS.mkdir(path);
 }
 
 bool appendLine(const String& path, const String& line, const String& headerIfNew = "") {
   if (!gSdOk) return false;
 
-  bool exists = SD.exists(path.c_str());
-  File f = SD.open(path.c_str(), FILE_APPEND);
+  bool exists = LittleFS.exists(path.c_str());
+  File f = LittleFS.open(path.c_str(), FILE_APPEND);
   if (!f) return false;
 
   if (!exists && headerIfNew.length()) {
@@ -582,7 +576,7 @@ void deleteOldDailyFileIfNeeded(time_t todayMidnightLocal) {
   time_t oldMidnight = subtractDaysLocalMidnight(todayMidnightLocal, LogConfig::RETENTION_DAYS + 1);
   String ymd = ymdString(oldMidnight);
   String dataPath = String("/data/") + ymd + ".csv";
-  if (gSdOk && SD.exists(dataPath.c_str())) SD.remove(dataPath.c_str());
+  if (gSdOk && LittleFS.exists(dataPath.c_str())) LittleFS.remove(dataPath.c_str());
 }
 
 void logBucketToSD(const BucketSample& b) {
@@ -633,7 +627,7 @@ void logBucketToSD(const BucketSample& b) {
 }
 
 static bool deleteDirFiles(const char* dirPath) {
-  File dir = SD.open(dirPath);
+  File dir = LittleFS.open(dirPath);
   if (!dir) return false;
   bool ok = true;
   while (true) {
@@ -645,7 +639,7 @@ static bool deleteDirFiles(const char* dirPath) {
     }
     String name = entry.name();
     entry.close();
-    if (!SD.remove(name.c_str())) ok = false;
+    if (!LittleFS.remove(name.c_str())) ok = false;
   }
   dir.close();
   return ok;
@@ -694,8 +688,8 @@ void loadRecentBucketsFromSD(time_t nowEpoch) {
 
   auto loadFile = [&](time_t dayMidnightLocal) {
     String path = String("/data/") + ymdString(dayMidnightLocal) + ".csv";
-    if (!SD.exists(path.c_str())) return;
-    File f = SD.open(path.c_str(), FILE_READ);
+    if (!LittleFS.exists(path.c_str())) return;
+    File f = LittleFS.open(path.c_str(), FILE_READ);
     if (!f) return;
     while (f.available()) {
       String line = f.readStringUntil('\n');
@@ -1105,7 +1099,7 @@ void loadDaySummariesFromSD(time_t nowEpoch) {
   time_t todayMid = localMidnight(nowEpoch);
   String todayYmd = ymdString(todayMid);
 
-  File dir = SD.open("/data");
+  File dir = LittleFS.open("/data");
   if (!dir) return;
 
   // Collect per-day aggregates
@@ -1374,12 +1368,12 @@ void handleDownload() {
   }
 
   String path = "/data/" + filename;
-  if (!SD.exists(path.c_str())) {
+  if (!LittleFS.exists(path.c_str())) {
     server.send(404, "text/plain", "Not found");
     return;
   }
 
-  File f = SD.open(path.c_str(), FILE_READ);
+  File f = LittleFS.open(path.c_str(), FILE_READ);
   if (!f) {
     server.send(500, "text/plain", "Failed to open file");
     return;
@@ -1402,7 +1396,7 @@ void handleApiFiles() {
   String dir = "data";
   String base = "/data";
 
-  if (!SD.exists(base.c_str())) {
+  if (!LittleFS.exists(base.c_str())) {
     server.send(200, "application/json", String("{\"ok\":true,\"dir\":\"") + dir + "\",\"files\":[]}");
     return;
   }
@@ -1413,7 +1407,7 @@ void handleApiFiles() {
     return;
   }
 
-  File root = SD.open(base.c_str());
+  File root = LittleFS.open(base.c_str());
   if (!root || !root.isDirectory()) {
     server.send(500, "application/json", "{\"ok\":false,\"error\":\"failed_to_open_dir\"}");
     return;
@@ -1507,8 +1501,8 @@ static std::vector<ZipEntryInfo> buildLastNDaysList(int days) {
     String ymd = ymdString(dayMidnight);
     String sdPath = String("/data/") + ymd + ".csv";
 
-    if (gSdOk && SD.exists(sdPath.c_str())) {
-      File f = SD.open(sdPath.c_str(), FILE_READ);
+    if (gSdOk && LittleFS.exists(sdPath.c_str())) {
+      File f = LittleFS.open(sdPath.c_str(), FILE_READ);
       if (f) {
         ZipEntryInfo e;
         e.sdPath = sdPath;
@@ -1578,7 +1572,7 @@ void handleDownloadZip() {
 
   // Local headers + data + data descriptors
   for (auto &e : entries) {
-    File f = SD.open(e.sdPath.c_str(), FILE_READ);
+    File f = LittleFS.open(e.sdPath.c_str(), FILE_READ);
     if (!f) continue;
 
     e.lho = offset;
@@ -1667,8 +1661,8 @@ void handleDownloadZip() {
 // ------------------- WEB UI + API -------------------
 
 void handleRoot() {
-  if (gSdOk && SD.exists("/web/index.html")) {
-    File f = SD.open("/web/index.html", FILE_READ);
+  if (gSdOk && LittleFS.exists("/web/index.html")) {
+    File f = LittleFS.open("/web/index.html", FILE_READ);
     if (f) {
       server.streamFile(f, "text/html");
       f.close();
@@ -1714,8 +1708,8 @@ void handleApiHelp() {
 }
 
 void handleRootJs() {
-  if (gSdOk && SD.exists("/web/app.js")) {
-    File f = SD.open("/web/app.js", FILE_READ);
+  if (gSdOk && LittleFS.exists("/web/app.js")) {
+    File f = LittleFS.open("/web/app.js", FILE_READ);
     if (f) {
       server.streamFile(f, "application/javascript");
       f.close();
@@ -1735,14 +1729,14 @@ void handleApiClearData() {
                             : "{\"ok\":false,\"error\":\"unauthorized\"}");
     return;
   }
-  if (!SDConfig::ENABLE || !gSdOk) {
-    server.send(503, "application/json", "{\"ok\":false,\"error\":\"sd_not_available\"}");
-    return;
-  }
+#ifdef SD_CARD_ENABLE
+  server.send(503, "application/json", "{\"ok\":false,\"error\":\"sd_not_available\"}");
+#else
   bool ok = deleteDirFiles("/data");
   invalidateFilesCache();
   String out = String("{\"ok\":") + (ok ? "true" : "false") + "}";
   server.send(ok ? 200 : 500, "application/json", out);
+#endif
 }
 
 void handleApiDelete() {
@@ -1764,11 +1758,11 @@ void handleApiDelete() {
     return;
   }
   String path = "/data/" + filename;
-  if (!SD.exists(path.c_str())) {
+  if (!LittleFS.exists(path.c_str())) {
     server.send(404, "application/json", "{\"ok\":false,\"error\":\"not_found\"}");
     return;
   }
-  bool ok = SD.remove(path.c_str());
+  bool ok = LittleFS.remove(path.c_str());
   if (!ok) {
     server.send(500, "application/json", "{\"ok\":false,\"error\":\"delete_failed\"}");
     return;
@@ -1792,6 +1786,9 @@ void handleApiReboot() {
 }
 
 // ------------------- AQI CALCULATION -------------------
+
+#ifdef AIR_QUAL_SENSOR
+
 #if AQI_STANDARD == 0
 // EPA (US) AQI Standard
 // Calculate EPA AQI for PM2.5 (24-hour average, but we use current reading)
@@ -1876,6 +1873,8 @@ const char* getAQICategory(int aqi) {
 #else
 #error "Invalid AQI_STANDARD. Must be 0 (EPA) or 1 (Australian)"
 #endif
+
+#endif // AIR_QUAL_SENSOR
 
 void handleApiNow() {
 #ifdef WIND_SENSOR
@@ -2325,8 +2324,8 @@ void handleApiUiFiles() {
   const char* webFiles[] = {"/web/index.html", "/web/app.js"};
   for (int i = 0; i < 2; i++) {
     const char* path = webFiles[i];
-    if (SD.exists(path)) {
-      File f = SD.open(path, FILE_READ);
+    if (LittleFS.exists(path)) {
+      File f = LittleFS.open(path, FILE_READ);
       if (f) {
         if (!first) out += ",";
         first = false;
@@ -2368,17 +2367,17 @@ void handleUploadData() {
       return;
     }
 
-    if (!SD.exists("/web")) {
-      SD.mkdir("/web");
+    if (!LittleFS.exists("/web")) {
+      LittleFS.mkdir("/web");
     }
 
     // Delete any previous temp file
-    if (SD.exists(TEMP_UPLOAD_FILE)) {
-      SD.remove(TEMP_UPLOAD_FILE);
+    if (LittleFS.exists(TEMP_UPLOAD_FILE)) {
+      LittleFS.remove(TEMP_UPLOAD_FILE);
     }
 
     // Save to temporary file first
-    gUploadFile = SD.open(TEMP_UPLOAD_FILE, FILE_WRITE);
+    gUploadFile = LittleFS.open(TEMP_UPLOAD_FILE, FILE_WRITE);
     if (!gUploadFile) {
       gUploadError = true;
       gUploadErrorMsg = "failed_to_create_file";
@@ -2398,8 +2397,8 @@ void handleUploadComplete() {
   // Check for upload errors first
   if (gUploadError) {
     // Delete temp file on error
-    if (SD.exists(TEMP_UPLOAD_FILE)) {
-      SD.remove(TEMP_UPLOAD_FILE);
+    if (LittleFS.exists(TEMP_UPLOAD_FILE)) {
+      LittleFS.remove(TEMP_UPLOAD_FILE);
     }
 
     int statusCode = 500;
@@ -2423,35 +2422,35 @@ void handleUploadComplete() {
 
   // Validate path
   if (path.length() == 0) {
-    if (SD.exists(TEMP_UPLOAD_FILE)) SD.remove(TEMP_UPLOAD_FILE);
+    if (LittleFS.exists(TEMP_UPLOAD_FILE)) LittleFS.remove(TEMP_UPLOAD_FILE);
     server.send(400, "application/json", "{\"ok\":false,\"error\":\"missing_path\"}");
     return;
   }
 
   // Check for path traversal attempts
   if (path.indexOf("..") >= 0) {
-    if (SD.exists(TEMP_UPLOAD_FILE)) SD.remove(TEMP_UPLOAD_FILE);
+    if (LittleFS.exists(TEMP_UPLOAD_FILE)) LittleFS.remove(TEMP_UPLOAD_FILE);
     server.send(403, "application/json", "{\"ok\":false,\"error\":\"path_traversal_detected\"}");
     return;
   }
 
   // Check for backslashes (Windows-style paths)
   if (path.indexOf('\\') >= 0) {
-    if (SD.exists(TEMP_UPLOAD_FILE)) SD.remove(TEMP_UPLOAD_FILE);
+    if (LittleFS.exists(TEMP_UPLOAD_FILE)) LittleFS.remove(TEMP_UPLOAD_FILE);
     server.send(403, "application/json", "{\"ok\":false,\"error\":\"invalid_path_separator\"}");
     return;
   }
 
   // Ensure path starts with /web/
   if (!path.startsWith("/web/")) {
-    if (SD.exists(TEMP_UPLOAD_FILE)) SD.remove(TEMP_UPLOAD_FILE);
+    if (LittleFS.exists(TEMP_UPLOAD_FILE)) LittleFS.remove(TEMP_UPLOAD_FILE);
     server.send(403, "application/json", "{\"ok\":false,\"error\":\"forbidden_path\"}");
     return;
   }
 
   // Validate that path doesn't have double slashes or other suspicious patterns
   if (path.indexOf("//") >= 0) {
-    if (SD.exists(TEMP_UPLOAD_FILE)) SD.remove(TEMP_UPLOAD_FILE);
+    if (LittleFS.exists(TEMP_UPLOAD_FILE)) LittleFS.remove(TEMP_UPLOAD_FILE);
     server.send(403, "application/json", "{\"ok\":false,\"error\":\"invalid_path_format\"}");
     return;
   }
@@ -2459,7 +2458,7 @@ void handleUploadComplete() {
   // Extract filename from path and validate it
   int lastSlash = path.lastIndexOf('/');
   if (lastSlash < 0 || lastSlash == path.length() - 1) {
-    if (SD.exists(TEMP_UPLOAD_FILE)) SD.remove(TEMP_UPLOAD_FILE);
+    if (LittleFS.exists(TEMP_UPLOAD_FILE)) LittleFS.remove(TEMP_UPLOAD_FILE);
     server.send(403, "application/json", "{\"ok\":false,\"error\":\"invalid_filename\"}");
     return;
   }
@@ -2469,7 +2468,7 @@ void handleUploadComplete() {
   for (unsigned int i = 0; i < filename.length(); i++) {
     char c = filename.charAt(i);
     if (!isalnum(c) && c != '-' && c != '_' && c != '.') {
-      if (SD.exists(TEMP_UPLOAD_FILE)) SD.remove(TEMP_UPLOAD_FILE);
+      if (LittleFS.exists(TEMP_UPLOAD_FILE)) LittleFS.remove(TEMP_UPLOAD_FILE);
       server.send(403, "application/json", "{\"ok\":false,\"error\":\"invalid_filename_characters\"}");
       return;
     }
@@ -2481,8 +2480,8 @@ void handleUploadComplete() {
 
   if (!gUploadPasswordVerified) {
     // Password failed - delete temp file
-    if (SD.exists(TEMP_UPLOAD_FILE)) {
-      SD.remove(TEMP_UPLOAD_FILE);
+    if (LittleFS.exists(TEMP_UPLOAD_FILE)) {
+      LittleFS.remove(TEMP_UPLOAD_FILE);
     }
 
     int statusCode = rateLimited ? 429 : 401;
@@ -2492,17 +2491,17 @@ void handleUploadComplete() {
   } else {
     // Password OK - move temp file to final location
     // Delete existing file if present
-    if (SD.exists(path.c_str())) {
-      SD.remove(path.c_str());
+    if (LittleFS.exists(path.c_str())) {
+      LittleFS.remove(path.c_str());
     }
 
     // Rename temp file to final name
-    if (SD.rename(TEMP_UPLOAD_FILE, path.c_str())) {
+    if (LittleFS.rename(TEMP_UPLOAD_FILE, path.c_str())) {
       server.send(200, "application/json",
                   "{\"ok\":true,\"bytes\":" + String(server.upload().totalSize) + "}");
     } else {
       // Rename failed - try to delete temp file
-      if (SD.exists(TEMP_UPLOAD_FILE)) SD.remove(TEMP_UPLOAD_FILE);
+      if (LittleFS.exists(TEMP_UPLOAD_FILE)) LittleFS.remove(TEMP_UPLOAD_FILE);
       server.send(500, "application/json", "{\"ok\":false,\"error\":\"rename_failed\"}");
     }
   }
@@ -2515,7 +2514,7 @@ void handleUploadComplete() {
 void saveDaySummariesCache(const DaySummary* curDay, bool hasCurDay) {
   if (!gSdOk) return;
   ensureDir("/data");
-  File f = SD.open("/data/day_summaries_cache.csv", FILE_WRITE);
+  File f = LittleFS.open("/data/day_summaries_cache.csv", FILE_WRITE);
   if (!f) return;
   f.print("dayStartEpoch,avgWind,maxWind,avgTemp,minTemp,maxTemp,avgHum,minHum,maxHum,avgPress,minPress,maxPress,avgPM1,maxPM1,avgPM25,maxPM25,avgPM10,maxPM10\n");
   auto writeRow = [&](const DaySummary& d){
@@ -2557,8 +2556,8 @@ void saveDaySummariesCache(const DaySummary* curDay, bool hasCurDay) {
 }
 
 bool loadDaySummariesCache() {
-  if (!gSdOk || !SD.exists("/data/day_summaries_cache.csv")) return false;
-  File f = SD.open("/data/day_summaries_cache.csv", FILE_READ);
+  if (!gSdOk || !LittleFS.exists("/data/day_summaries_cache.csv")) return false;
+  File f = LittleFS.open("/data/day_summaries_cache.csv", FILE_READ);
   if (!f) return false;
   memset(gDays, 0, sizeof(gDays));
   gDayWrite = 0;
@@ -2624,17 +2623,14 @@ bool syncTimeWithNTP(uint32_t timeoutMs = 20000) {
   return false;
 }
 
-void initSD() {
-  gSdOk = false;
-  if (!SDConfig::ENABLE) return;
+#define FORMAT_LITTLEFS_IF_FAILED true
 
-  // If your board needs explicit SPI pins, do it here, e.g.:
-  // SPI.begin(SCK, MISO, MOSI, SDConfig::CS_PIN);
-
-  if (!SD.begin(SDConfig::CS_PIN)) return;
-
-  gSdOk = true;
-  ensureDir("/data");
+bool initSD() {
+#ifdef SD_CARD_ENABLE
+  return LittleFS.begin(FORMAT_LITTLEFS_IF_FAILED);
+#else
+  return false;
+#endif
 }
 
 // ------------------- LOOP HELPERS -------------------
@@ -2795,15 +2791,15 @@ void setup() {
   }
 #endif
 
-  initSD();
+  gSdOk = initSD();
 
   time_t nowE = epochNow();
   gTodayMidnightEpoch = localMidnight(nowE);
   deleteOldDailyFileIfNeeded(gTodayMidnightEpoch);
 
   // Remove stale cache file if it exists
-  if (gSdOk && SD.exists("/data/day_summaries_cache.csv")) {
-    SD.remove("/data/day_summaries_cache.csv");
+  if (gSdOk && LittleFS.exists("/data/day_summaries_cache.csv")) {
+    LittleFS.remove("/data/day_summaries_cache.csv");
   }
 
   // Always load fresh from SD to avoid stale cache issues
