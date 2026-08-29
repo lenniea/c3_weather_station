@@ -39,9 +39,231 @@
 #include "upload_page.h"
 #include "api_help_page.h"
 
+// UI and API password
+static const char* API_PASSWORD = "ChangeMe";
+//Over the air update password
+static const char* OTA_PASSWORD = "PleaseChangeMe";
+
+
+#ifdef WIND_SENSOR
+
+// Wind Sensor (Pulse-based Anemometer)
+namespace WindConfig {
+  static constexpr int   PULSE_PIN = 3;                 // GPIO pin
+  static constexpr float PPS_TO_MS = 1.75f / 20.0f;     // Calibration: 20pps = 1.75m/s
+  static constexpr uint32_t PPS_WINDOW_MS = 1000;       // Calculate every 1 second
+  static constexpr uint32_t DEBOUNCE_US = 2000;         // 2ms debounce
+}
+
+#endif
+
+#ifdef BME280_SENSOR  1
+
+// BME280 Environmental Sensor (I2C)
+namespace BME280Config {
+  static constexpr bool     ENABLE = true;
+  static constexpr uint8_t  I2C_ADDR_PRIMARY = 0x76;
+  static constexpr uint8_t  I2C_ADDR_FALLBACK = 0x77;
+  static constexpr uint32_t POLL_INTERVAL_MS = 2000;
+  static constexpr float    ALTITUDE_METERS = 580.0f;  // Station altitude for MSLP calculation (0 = sea level)
+}
+
+#endif
+
+#ifdef AIR_QUAL_SENSOR
+
+// PMS5003 Air Quality Sensor (UART)
+namespace PMS5003Config {
+  static constexpr bool     ENABLE = true;
+  static constexpr int      RX_PIN = 4;
+  static constexpr int      TX_PIN = 5;  // Not used, but required for Serial2.begin()
+  static constexpr uint32_t POLL_INTERVAL_MS = 2000;  // Poll every 2 seconds
+}
+
+// AQI (Air Quality Index) Calculation Standard
+// Choose which AQI standard to use:
+//   0 = EPA (United States Environmental Protection Agency)
+//       - Scale: 0-500
+//       - Categories: Good (0-50), Moderate (51-100), Unhealthy for Sensitive (101-150),
+//                     Unhealthy (151-200), Very Unhealthy (201-300), Hazardous (301+)
+//       - PM2.5 breakpoints: 0-12, 12.1-35.4, 35.5-55.4, 55.5-150.4, 150.5-250.4, 250.5+
+//       - PM10 breakpoints: 0-54, 55-154, 155-254, 255-354, 355-424, 425+
+//
+//   1 = Australian AQI
+//       - Scale: 0-200+
+//       - Categories: Very Good (0-33), Good (34-66), Fair (67-99),
+//                     Poor (100-149), Very Poor (150-200), Hazardous (200+)
+//       - PM2.5 breakpoints: 0-25, 26-50, 51-100, 101-150, 151-200, 200+
+//       - PM10 breakpoints: 0-50, 51-100, 101-200, 201-300, 301-400, 400+
+//
+// IMPORTANT: If you change this, also update the color thresholds in web/app.js (setAQIPill function)
+#define AQI_STANDARD 1  // 0=EPA, 1=Australian
+
+#endif
+
+// SD Card (SPI)
+namespace SDConfig {
+  static constexpr bool ENABLE = true;
+  static constexpr int  CS_PIN = 20;
+}
+
+// Data Logging
+namespace LogConfig {
+  static constexpr int BUCKET_SECONDS = 60;             // Log interval (1 minute)
+  static constexpr int BUCKETS_24H = 24 * 60 * 60 / BUCKET_SECONDS;
+  static constexpr int RETENTION_DAYS = 0;           // 0 = never delete
+  static constexpr int DAYS_HISTORY = 30;               // RAM history
+  static_assert((86400 % BUCKET_SECONDS) == 0, "BUCKET_SECONDS must divide evenly into 24h");
+}
+
+// Network & Time
+namespace NetworkConfig {
+  static const char* NTP_SERVER_1 = "pool.ntp.org";
+  static const char* NTP_SERVER_2 = "time.google.com";
+  static const char* NTP_SERVER_3 = "time.windows.com";
+  static const char* TIMEZONE = "PST8PDT"; // Pacific Daylight Savings Time
+  static const char* AP_NAME = "Anemometer-Setup";
+  static constexpr uint32_t AP_TIMEOUT_S = 180;
+}
+
+// Web UI
+namespace UIConfig {
+  static constexpr int FILES_PER_PAGE = 30;
+  static constexpr int MAX_PLOT_POINTS = 500;
+}
+
+// ==================== PLOT CONFIGURATION ====================
+
+struct PlotSeries {
+  const char* field;       // Data field name (e.g., "avgWind", "maxWind")
+  const char* color;       // SVG color
+  const char* label;       // Display label for tooltip
+  bool visible;            // Show by default
+};
+
+struct PlotConfig {
+  const char* id;          // Unique ID (e.g., "wind", "temp")
+  const char* title;       // Display title
+  const char* unit;        // Unit string (e.g., "km/h", "°C")
+  float conversionFactor;  // Multiply data by this (e.g., 3.6 for m/s to km/h)
+  PlotSeries series[3];    // Max 3 series per plot
+  int seriesCount;
+};
+
+// Plot definitions
+static const PlotConfig PLOTS[] = {
+#ifdef WIND_SENSOR
+  {
+    "wind",
+    "Wind Speed",
+    "km/h",
+    3.6f,  // m/s to km/h
+    {
+      {"avgWind", "black", "Wind", true},
+      {"maxWind", "#f0ad4e", "Gust", true}
+    },
+    2
+  },
+#endif
+#ifdef BME280_SENSOR
+  {
+    "temp",
+    "Temperature",
+    "°C",
+    1.0f,
+    {
+      {"avgTempC", "#d9534f", "Temp", true},
+      {nullptr, nullptr, nullptr, false}
+    },
+    1
+  },
+  {
+    "hum",
+    "Humidity",
+    "%",
+    1.0f,
+    {
+      {"avgHumRH", "#0275d8", "Humidity", true},
+      {nullptr, nullptr, nullptr, false}
+    },
+    1
+  },
+  {
+    "press",
+    "Pressure (MSLP)",
+    "hPa",
+    1.0f,
+    {
+      {"avgPressHpa", "#5cb85c", "Pressure", true},
+      {nullptr, nullptr, nullptr, false}
+    },
+    1
+  },
+#endif
+#ifdef AIR_QUAL_SENSOR
+  {
+    "pm",
+    "Air Quality (PM)",
+    "μg/m³",
+    1.0f,
+    {
+      {"avgPM25", "#ff6600", "PM2.5", true},
+      {"avgPM10", "#996633", "PM10", true},
+      {"avgPM1", "#9966cc", "PM1.0", true}
+    },
+    3
+  }
+#endif
+};
+
+static constexpr int PLOTS_COUNT = sizeof(PLOTS) / sizeof(PLOTS[0]);
+
+// ==================== TABLE CONFIGURATION ====================
+
+struct TableColumn {
+  const char* field;       // Data field name
+  const char* label;       // Column sub-header (avg, max, min)
+  const char* unit;        // Unit to display
+  float conversionFactor;  // Multiply by this
+  int decimals;            // Decimal places
+  const char* bgColor;     // Background color (hex or empty for default)
+  const char* group;       // Group header (Wind Speed, Temperature, etc.)
+};
+
+static const TableColumn TABLE_COLUMNS[] = {
+  {"day", "Day", "", 1.0f, 0, "", ""},
+#ifdef WIND_SENSOR
+  {"avgWind", "avg", "km/h", 3.6f, 1, "#f8f8f8", "Wind Speed"},
+  {"maxWind", "max", "km/h", 3.6f, 1, "#f8f8f8", "Wind Speed"},
+#endif
+#ifdef BME280_SENSOR
+  {"avgTemp", "avg", "°C", 1.0f, 1, "", "Temperature"},
+  {"minTemp", "min", "°C", 1.0f, 1, "", "Temperature"},
+  {"maxTemp", "max", "°C", 1.0f, 1, "", "Temperature"},
+  {"avgHum", "avg", "%", 1.0f, 1, "#f8f8f8", "Humidity"},
+  {"minHum", "min", "%", 1.0f, 1, "#f8f8f8", "Humidity"},
+  {"maxHum", "max", "%", 1.0f, 1, "#f8f8f8", "Humidity"},
+  {"avgPress", "avg", "hPa", 1.0f, 1, "", "Pressure"},
+  {"minPress", "min", "hPa", 1.0f, 1, "", "Pressure"},
+  {"maxPress", "max", "hPa", 1.0f, 1, "", "Pressure"},
+#endif
+#ifdef AIR_QUAL_SENSOR
+  {"avgPM1", "PM1 avg", "μg/m³", 1.0f, 1, "#f8f8f8", "Particulate Matter"},
+  {"maxPM1", "PM1 max", "μg/m³", 1.0f, 1, "#f8f8f8", "Particulate Matter"},
+  {"avgPM25", "PM2.5 avg", "μg/m³", 1.0f, 1, "#f8f8f8", "Particulate Matter"},
+  {"maxPM25", "PM2.5 max", "μg/m³", 1.0f, 1, "#f8f8f8", "Particulate Matter"},
+  {"avgPM10", "PM10 avg", "μg/m³", 1.0f, 1, "#f8f8f8", "Particulate Matter"},
+  {"maxPM10", "PM10 max", "μg/m³", 1.0f, 1, "#f8f8f8", "Particulate Matter"}
+#endif
+};
+
+static constexpr int TABLE_COLUMNS_COUNT = sizeof(TABLE_COLUMNS) / sizeof(TABLE_COLUMNS[0]);
+
 // ------------------- UART FOR PMS5003 -------------------
 // ESP32-C3 doesn't have Serial2 predefined, create custom HardwareSerial
+#ifdef AIR_QUAL_SENSOR
 HardwareSerial Serial2(1);  // Use UART1 for PMS5003
+#endif
 
 // ------------------- FORWARD DECLARATIONS -------------------
 
@@ -56,21 +278,30 @@ void rebuildTodayAggregates();
 
 struct BucketSample {
   time_t startEpoch;
+#ifdef WIND_SENSOR
   float avgWind;         // m/s (NAN = invalid)
   float maxWind;         // m/s (NAN = invalid)
   uint32_t samples;
+#endif
+#ifdef BME280_SENSOR
   float avgTempC;        // °C (NAN = invalid)
   float avgHumRH;        // % (NAN = invalid)
   float avgPressHpa;     // hPa (NAN = invalid)
+#endif
+#ifdef AIR_QUAL_SENSOR
   float avgPM1;          // μg/m³ (NAN = invalid)
   float avgPM25;         // μg/m³ (NAN = invalid)
   float avgPM10;         // μg/m³ (NAN = invalid)
+#endif
 };
 
 struct DaySummary {
   time_t dayStartEpoch; // local midnight
+#ifdef WIND_SENSOR
   float avgWind;
   float maxWind;
+#endif
+#ifdef BME280_SENSOR
   float avgTemp;
   float minTemp;
   float maxTemp;
@@ -80,12 +311,15 @@ struct DaySummary {
   float avgPress;
   float minPress;
   float maxPress;
+#endif
+#ifdef AIR_QUAL_SENSOR
   float avgPM1;
   float maxPM1;
   float avgPM25;
   float maxPM25;
   float avgPM10;
   float maxPM10;
+#endif
 };
 
 static BucketSample gBuckets[LogConfig::BUCKETS_24H];
@@ -103,26 +337,35 @@ static float gNowWindMS = 0.0f;
 // timing / bucket accumulators
 static uint32_t gLastPpsMillis = 0;
 static time_t   gCurrentBucketStart = 0;
+#ifdef WIND_SENSOR
 static float    gBucketWindSum = 0.0f;
 static float    gBucketWindMax1 = 0.0f; // highest observed in bucket
 static float    gBucketWindMax2 = 0.0f; // second-highest observed in bucket
 static uint32_t gBucketSamples = 0;
 static uint32_t gBucketPulseCount = 0;
 static uint32_t gBucketPulseElapsedMs = 0;
+#endif
+#ifdef BME280_SENSOR
 static float    gBucketTempSum = 0.0f;
 static float    gBucketHumSum = 0.0f;
 static float    gBucketPressSumPa = 0.0f;
 static uint32_t gBucketEnvSamples = 0;
+#endif
+#ifdef AIR_QUAL_SENSOR
 static float    gBucketPM1Sum = 0.0f;
 static float    gBucketPM25Sum = 0.0f;
 static float    gBucketPM10Sum = 0.0f;
 static uint32_t gBucketPmSamples = 0;
+#endif
 
 // daily rollup
 static time_t   gTodayMidnightEpoch = 0;
 static float    gTodaySumOfBucketAvgs = 0.0f;
+#ifdef WIND_SENSOR
 static uint32_t gTodayBucketCount = 0;
 static float    gTodayMax = 0.0f;
+#endif
+#ifdef BME280_SENSOR
 static float    gTodayTempSum = 0.0f;
 static uint32_t gTodayTempCount = 0;
 static float    gTodayTempMin = NAN;
@@ -135,6 +378,8 @@ static float    gTodayPressSum = 0.0f;
 static uint32_t gTodayPressCount = 0;
 static float    gTodayPressMin = NAN;
 static float    gTodayPressMax = NAN;
+#endif
+
 static float    gTodayPM1Sum = 0.0f;
 static uint32_t gTodayPM1Count = 0;
 static float    gTodayPM1Max = NAN;
@@ -152,9 +397,12 @@ static time_t   gPwWindowStart = 0;
 // ------------------- HELPERS -------------------
 
 static void clearTodayAggregates() {
+#ifdef WIND_SENSOR
   gTodaySumOfBucketAvgs = 0.0f;
   gTodayBucketCount = 0;
   gTodayMax = 0.0f;
+#endif
+#ifdef BME280_SENSOR
   gTodayTempSum = 0.0f;
   gTodayTempCount = 0;
   gTodayTempMin = NAN;
@@ -167,6 +415,8 @@ static void clearTodayAggregates() {
   gTodayPressCount = 0;
   gTodayPressMin = NAN;
   gTodayPressMax = NAN;
+#endif
+#ifdef AIR_QUAL_SENSOR
   gTodayPM1Sum = 0.0f;
   gTodayPM1Count = 0;
   gTodayPM1Max = NAN;
@@ -176,8 +426,10 @@ static void clearTodayAggregates() {
   gTodayPM10Sum = 0.0f;
   gTodayPM10Count = 0;
   gTodayPM10Max = NAN;
+#endif
 }
 
+#ifdef BME280_SENSOR
 // BME280 latest
 static Adafruit_BME280 bme;
 static bool  gBmeOk = false;
@@ -185,7 +437,9 @@ static float gTempC = NAN;
 static float gHumRH = NAN;
 static float gPressurePa = NAN;
 static uint32_t gLastBmePollMillis = 0;
+#endif
 
+#ifdef AIR_QUAL_SENSOR
 // PMS5003 latest readings
 static const int PMS_FRAME_SIZE = 32;
 static const uint8_t PMS_HEADER_1 = 0x42;
@@ -196,7 +450,9 @@ static bool gPmsOk = false;
 static float gPM1 = NAN;
 static float gPM25 = NAN;
 static float gPM10 = NAN;
+
 static uint32_t gLastPmsPollMillis = 0;
+#endif
 
 // SD status
 static bool gSdOk = false;
@@ -341,20 +597,36 @@ void logBucketToSD(const BucketSample& b) {
   String backupFile = String("/backup/") + ymd + ".csv";
 
   String header =
-    "datetime,epoch,wind_avg_ms,wind_max_ms,temp_c,hum_rh,press_hpa,pm1,pm25,pm10,samples";
+    "datetime,epoch"
+#ifdef WIND_SENSOR
+    ",wind_avg_ms,wind_max_ms"
+#endif
+#ifdef BME280_SENSOR
+    ",temp_c,hum_rh,press_hpa"
+#endif
+#ifdef AIR_QUAL_SENSOR
+    ",pm1,pm25,pm10,samples"
+#endif
+  ;
 
   String line =
     fmtLocal(b.startEpoch) + "," +
     String((uint32_t)b.startEpoch) + "," +
+#ifdef WIND_SENSOR
     String(b.avgWind, 3) + "," +
     String(b.maxWind, 3) + "," +
+#endif
+#ifdef BME280_SENSOR
     String(b.avgTempC, 2) + "," +
     String(b.avgHumRH, 2) + "," +
     String(b.avgPressHpa, 2) + "," +
+#endif
+#ifdef AIR_QUAL_SENSOR
     String(isfinite(b.avgPM1) ? String(b.avgPM1, 1) : String("")) + "," +
     String(isfinite(b.avgPM25) ? String(b.avgPM25, 1) : String("")) + "," +
     String(isfinite(b.avgPM10) ? String(b.avgPM10, 1) : String("")) + "," +
     String(b.samples);
+#endif
 
   appendLine(dailyFile, line, header);
   appendLine(backupFile, line, header);
@@ -447,17 +719,24 @@ void loadRecentBucketsFromSD(time_t nowEpoch) {
       if (!timeIsValid(b.startEpoch) || b.startEpoch < cutoff) continue;
       // Skip buckets that don't align with current LogConfig::BUCKET_SECONDS setting
       if (b.startEpoch % LogConfig::BUCKET_SECONDS != 0) continue;
+    
       // Load floats directly from CSV
+#ifdef WIND_SENSOR
       b.avgWind = parseFloatOrNan(parts[2]);
       b.maxWind = parseFloatOrNan(parts[3]);
+#endif
+#ifdef BME280_SENSOR
       b.avgTempC = parseFloatOrNan(parts[4]);
       b.avgHumRH = parseFloatOrNan(parts[5]);
       b.avgPressHpa = parseFloatOrNan(parts[6]);
+#endif
+#ifdef AIR_QUAL_SENSOR
       // PM fields (optional for backward compatibility)
       b.avgPM1 = (numCols > 7) ? parseFloatOrNan(parts[7]) : NAN;
       b.avgPM25 = (numCols > 8) ? parseFloatOrNan(parts[8]) : NAN;
       b.avgPM10 = (numCols > 9) ? parseFloatOrNan(parts[9]) : NAN;
       b.samples = (uint32_t)std::max<long>(0, parts[numCols > 10 ? 10 : 7].toInt());
+#endif
       loaded.push_back(b);
     }
     f.close();
@@ -486,6 +765,7 @@ void loadRecentBucketsFromSD(time_t nowEpoch) {
   rebuildTodayAggregates();
 }
 
+#ifdef BME280_SENSOR
 // ------------------- BME280 -------------------
 // Convert station pressure to Mean Sea Level Pressure (MSLP)
 // Using the ICAO Standard Barometric Formula with measured temperature
@@ -523,6 +803,10 @@ void pollBME() {
     gBucketEnvSamples++;
   }
 }
+
+#endif
+
+#ifdef AIR_QUAL_SENSOR
 
 // ------------------- PMS5003 -------------------
 void pollPMS() {
@@ -573,24 +857,32 @@ void pollPMS() {
   }
 }
 
+#endif
+
 // ------------------- BUCKETS / DAILY -------------------
 
 void startBucketAt(time_t bucketStart) {
   gCurrentBucketStart = bucketStart;
+#ifdef WIND_SENSOR
   gBucketWindSum = 0.0f;
   gBucketWindMax1 = 0.0f;
   gBucketWindMax2 = 0.0f;
   gBucketSamples = 0;
   gBucketPulseCount = 0;
   gBucketPulseElapsedMs = 0;
+#endif
+#ifdef BME280_SENSOR
   gBucketTempSum = 0.0f;
   gBucketHumSum = 0.0f;
   gBucketPressSumPa = 0.0f;
   gBucketEnvSamples = 0;
+#endif
+#ifdef AIR_QUAL_SENSOR
   gBucketPM1Sum = 0.0f;
   gBucketPM25Sum = 0.0f;
   gBucketPM10Sum = 0.0f;
   gBucketPmSamples = 0;
+#endif
 }
 
 void pushBucketSample(const BucketSample& b) {
@@ -599,6 +891,7 @@ void pushBucketSample(const BucketSample& b) {
 }
 
 static void accumulateTodayFromBucket(const BucketSample& b) {
+#ifdef WIND_SENSOR
   // Use full precision floats for daily summary
   if (isfinite(b.avgWind)) {
     gTodaySumOfBucketAvgs += b.avgWind;
@@ -607,6 +900,8 @@ static void accumulateTodayFromBucket(const BucketSample& b) {
   if (isfinite(b.maxWind)) {
     if (b.maxWind > gTodayMax) gTodayMax = b.maxWind;
   }
+#endif
+#ifdef BME280_SENSOR
   if (isfinite(b.avgTempC)) {
     if (!isfinite(gTodayTempMin) || b.avgTempC < gTodayTempMin) gTodayTempMin = b.avgTempC;
     if (!isfinite(gTodayTempMax) || b.avgTempC > gTodayTempMax) gTodayTempMax = b.avgTempC;
@@ -625,6 +920,8 @@ static void accumulateTodayFromBucket(const BucketSample& b) {
     gTodayPressSum += b.avgPressHpa;
     gTodayPressCount++;
   }
+#endif
+#ifdef AIR_QUAL_SENSOR
   // PM accumulation (average only, no min/max)
   if (isfinite(b.avgPM1)) {
     gTodayPM1Sum += b.avgPM1;
@@ -641,14 +938,28 @@ static void accumulateTodayFromBucket(const BucketSample& b) {
     gTodayPM10Count++;
     if (!isfinite(gTodayPM10Max) || b.avgPM10 > gTodayPM10Max) gTodayPM10Max = b.avgPM10;
   }
+#endif
 }
 
-void pushDaySummary(time_t dayStart, float avgWind, float maxWind, float avgTemp, float minTemp, float maxTemp, float avgHum, float minHum, float maxHum, float avgPress = NAN, float minPress = NAN, float maxPress = NAN, float avgPM1 = NAN, float maxPM1 = NAN, float avgPM25 = NAN, float maxPM25 = NAN, float avgPM10 = NAN, float maxPM10 = NAN) {
+void pushDaySummary(time_t dayStart
+#ifdef WIND_SENSOR
+                   , float avgWind, float maxWind
+#endif
+#ifdef BME280_SENSOR
+                   , float avgTemp, float minTemp, float maxTemp, float avgHum, float minHum, float maxHum, float avgPress = NAN, float minPress = NAN, float maxPress = NAN
+#endif
+#ifdef AIR_QUAL_SENSOR
+                   , float avgPM1 = NAN, float maxPM1 = NAN, float avgPM25 = NAN, float maxPM25 = NAN, float avgPM10 = NAN, float maxPM10 = NAN
+#endif
+                  ) {
   if (!timeIsValid(dayStart)) return;
   DaySummary d{};
   d.dayStartEpoch = dayStart;
+#ifdef WIND_SENSOR
   d.avgWind = avgWind;
   d.maxWind = maxWind;
+#endif
+#ifdef BME280_SENSOR
   d.avgTemp = avgTemp;
   d.minTemp = minTemp;
   d.maxTemp = maxTemp;
@@ -658,13 +969,15 @@ void pushDaySummary(time_t dayStart, float avgWind, float maxWind, float avgTemp
   d.avgPress = avgPress;
   d.minPress = minPress;
   d.maxPress = maxPress;
+#endif
+#ifdef AIR_QUAL_SENSOR
   d.avgPM1 = avgPM1;
   d.maxPM1 = maxPM1;
   d.avgPM25 = avgPM25;
   d.maxPM25 = maxPM25;
   d.avgPM10 = avgPM10;
   d.maxPM10 = maxPM10;
-
+#endif
   gDays[gDayWrite] = d;
   gDayWrite = (gDayWrite + 1) % LogConfig::DAYS_HISTORY;
   if (gDaysCount < (uint32_t)LogConfig::DAYS_HISTORY) gDaysCount++;
@@ -679,16 +992,30 @@ void maybeRolloverDay(time_t nowEpoch) {
   }
 
   if (midnight != gTodayMidnightEpoch) {
-    if (gTodayBucketCount > 0) {
-      float avgWind = gTodaySumOfBucketAvgs / (float)gTodayBucketCount;
+#ifdef WIND_SENSOR
+      float avgWind = gTodayBucketCount ? (gTodaySumOfBucketAvgs / (float)gTodayBucketCount) : NAN;
+#endif
+#ifdef BME280_SENSOR
       float avgTemp = (gTodayTempCount > 0) ? (gTodayTempSum / (float)gTodayTempCount) : NAN;
       float avgHum  = (gTodayHumCount > 0) ? (gTodayHumSum / (float)gTodayHumCount) : NAN;
       float avgPress = (gTodayPressCount > 0) ? (gTodayPressSum / (float)gTodayPressCount) : NAN;
+#endif
+#ifdef AIR_QUAL_SENSOR
       float avgPM1 = (gTodayPM1Count > 0) ? (gTodayPM1Sum / (float)gTodayPM1Count) : NAN;
       float avgPM25 = (gTodayPM25Count > 0) ? (gTodayPM25Sum / (float)gTodayPM25Count) : NAN;
       float avgPM10 = (gTodayPM10Count > 0) ? (gTodayPM10Sum / (float)gTodayPM10Count) : NAN;
-      pushDaySummary(gTodayMidnightEpoch, avgWind, gTodayMax, avgTemp, gTodayTempMin, gTodayTempMax, avgHum, gTodayHumMin, gTodayHumMax, avgPress, gTodayPressMin, gTodayPressMax, avgPM1, gTodayPM1Max, avgPM25, gTodayPM25Max, avgPM10, gTodayPM10Max);
-    }
+#endif
+      pushDaySummary(gTodayMidnightEpoch
+#ifdef WIND_SENSOR
+                    , avgWind, gTodayMax
+#endif
+#ifdef BME280_SENSOR
+                    , avgTemp, gTodayTempMin, gTodayTempMax, avgHum, gTodayHumMin, gTodayHumMax, avgPress, gTodayPressMin, gTodayPressMax
+#endif
+#ifdef AIR_QUAL_SENSOR
+                    , avgPM1, gTodayPM1Max, avgPM25, gTodayPM25Max, avgPM10, gTodayPM10Max
+#endif
+                  );
 
     gTodayMidnightEpoch = midnight;
     clearTodayAggregates();
@@ -725,8 +1052,10 @@ struct DayAgg {
 
 static void computeBucketSample(BucketSample& b, time_t bucketStart) {
   b.startEpoch = bucketStart;
+#ifdef WIND_SENSOR
   b.samples = gBucketSamples;
-
+#endif
+#ifdef BME280_SENSOR
   if (gBucketEnvSamples > 0) {
     b.avgTempC = gBucketTempSum / (float)gBucketEnvSamples;
     b.avgHumRH = gBucketHumSum / (float)gBucketEnvSamples;
@@ -736,7 +1065,8 @@ static void computeBucketSample(BucketSample& b, time_t bucketStart) {
     b.avgHumRH = NAN;
     b.avgPressHpa = NAN;
   }
-
+#endif
+#ifdef WIND_SENSOR
   // Wind
   float avgWindMs = 0.0f;
   if (gBucketPulseElapsedMs > 0) {
@@ -750,7 +1080,8 @@ static void computeBucketSample(BucketSample& b, time_t bucketStart) {
   float maxWindMs = gBucketWindMax1;
   if (maxWindMs < avgWindMs) maxWindMs = avgWindMs;
   b.maxWind = maxWindMs;
-
+#endif
+#ifdef AIR_QUAL_SENSOR
   // PM averages
   if (gBucketPmSamples > 0) {
     b.avgPM1 = gBucketPM1Sum / (float)gBucketPmSamples;
@@ -761,6 +1092,7 @@ static void computeBucketSample(BucketSample& b, time_t bucketStart) {
     b.avgPM25 = NAN;
     b.avgPM10 = NAN;
   }
+#endif
 }
 
 void loadDaySummariesFromSD(time_t nowEpoch) {
@@ -888,10 +1220,19 @@ void loadDaySummariesFromSD(time_t nowEpoch) {
     float avgPM1 = (a.pm1Count > 0) ? (a.pm1Sum / (float)a.pm1Count) : NAN;
     float avgPM25 = (a.pm25Count > 0) ? (a.pm25Sum / (float)a.pm25Count) : NAN;
     float avgPM10 = (a.pm10Count > 0) ? (a.pm10Sum / (float)a.pm10Count) : NAN;
-    pushDaySummary(entries[i].day, avgWind, maxWind, avgTemp, a.tempMin, a.tempMax,
+    pushDaySummary(entries[i].day
+#ifdef WIND_SENSOR
+                  , avgWind, maxWind
+#endif
+#ifdef BME280_SENSOR
+                  , avgTemp, a.tempMin, a.tempMax,
                    (a.humCount > 0) ? (a.humSum / (float)a.humCount) : NAN,
-                   a.humMin, a.humMax, avgPress, a.pressMin, a.pressMax,
-                   avgPM1, a.pm1Max, avgPM25, a.pm25Max, avgPM10, a.pm10Max);
+                   a.humMin, a.humMax, avgPress, a.pressMin, a.pressMax
+#endif
+#ifdef AIR_QUAL_SENSOR
+                  , avgPM1, a.pm1Max, avgPM25, a.pm25Max, avgPM10, a.pm10Max
+#endif
+                );
   }
 }
 
@@ -917,11 +1258,12 @@ void rebuildTodayAggregates() {
 
 bool buildCurrentDaySummary(DaySummary& out) {
   if (!timeIsValid(gTodayMidnightEpoch)) return false;
-
+#ifdef WIND_SENSOR
   float sumWind = gTodaySumOfBucketAvgs;
   uint32_t windCount = gTodayBucketCount;
   float maxWind = gTodayMax;
-
+#endif
+#ifdef BME280_SENSOR
   float tempSum = gTodayTempSum;
   uint32_t tempCount = gTodayTempCount;
   float tempMin = gTodayTempMin;
@@ -938,13 +1280,23 @@ bool buildCurrentDaySummary(DaySummary& out) {
   float pressMax = gTodayPressMax;
 
   // Do not incluide the in-progress bucket's data in this step.
-
-  bool hasData = (windCount > 0) || (tempCount > 0) || (humCount > 0) || (pressCount > 0);
+  bool hasData = 
+#ifdef WIND_SENSOR
+        (windCount > 0)
+#else
+        false
+#endif
+#ifdef BME280_SENSOR
+         || (tempCount > 0) || (humCount > 0) || (pressCount > 0);
+#endif
   if (!hasData) return false;
-
+#endif
   out.dayStartEpoch = gTodayMidnightEpoch;
+#ifdef WIND_SENSOR
   out.avgWind = (windCount > 0) ? (sumWind / (float)windCount) : NAN;
   out.maxWind = (windCount > 0) ? maxWind : NAN;
+#endif
+#ifdef BME280_SENSOR
   out.avgTemp = (tempCount > 0) ? (tempSum / (float)tempCount) : NAN;
   out.minTemp = tempMin;
   out.maxTemp = tempMax;
@@ -954,7 +1306,8 @@ bool buildCurrentDaySummary(DaySummary& out) {
   out.avgPress = (pressCount > 0) ? (pressSum / (float)pressCount) : NAN;
   out.minPress = pressMin;
   out.maxPress = pressMax;
-
+#endif
+#ifdef AIR_QUAL_SENSOR
   // PM data
   out.avgPM1 = (gTodayPM1Count > 0) ? (gTodayPM1Sum / (float)gTodayPM1Count) : NAN;
   out.maxPM1 = gTodayPM1Max;
@@ -962,6 +1315,7 @@ bool buildCurrentDaySummary(DaySummary& out) {
   out.maxPM25 = gTodayPM25Max;
   out.avgPM10 = (gTodayPM10Count > 0) ? (gTodayPM10Sum / (float)gTodayPM10Count) : NAN;
   out.maxPM10 = gTodayPM10Max;
+#endif
 
   return true;
 }
@@ -1524,22 +1878,28 @@ const char* getAQICategory(int aqi) {
 #endif
 
 void handleApiNow() {
+#ifdef WIND_SENSOR
   float pps = (WindConfig::PPS_TO_MS > 0.0f) ? (gNowWindMS / WindConfig::PPS_TO_MS) : 0.0f;
+#endif
   time_t nowE = epochNow();
+#if BME280_SENSOR
   float press_hpa = isfinite(gPressurePa) ? (gPressurePa / 100.0f) : NAN;
+#endif
 
   String out = "{";
   out += "\"epoch\":" + String((uint32_t)nowE) + ",";
   out += "\"local_time\":\"" + fmtLocal(nowE) + "\",";
-
+#ifdef WIND_SENSOR
   out += "\"wind_pps\":" + (isfinite(pps) ? String(pps, 3) : String("null")) + ",";
   out += "\"wind_ms\":" + (isfinite(gNowWindMS) ? String(gNowWindMS, 3) : String("null")) + ",";
-
+#endif
+#ifdef BME280_SENSOR
   out += "\"bme280_ok\":" + String(gBmeOk ? "true" : "false") + ",";
   out += "\"temp_c\":" + (isfinite(gTempC) ? String(gTempC, 2) : String("null")) + ",";
   out += "\"hum_rh\":" + (isfinite(gHumRH) ? String(gHumRH, 2) : String("null")) + ",";
   out += "\"press_hpa\":" + (isfinite(press_hpa) ? String(press_hpa, 2) : String("null")) + ",";
-
+#endif
+#ifdef AIR_QUAL_SENSOR
   out += "\"pms5003_ok\":" + String(gPmsOk ? "true" : "false") + ",";
   out += "\"pm1\":" + (isfinite(gPM1) ? String(gPM1, 1) : String("null")) + ",";
   out += "\"pm25\":" + (isfinite(gPM25) ? String(gPM25, 1) : String("null")) + ",";
@@ -1552,7 +1912,7 @@ void handleApiNow() {
   out += "\"aqi_pm25_category\":\"" + String(getAQICategory(aqiPM25)) + "\",";
   out += "\"aqi_pm10\":" + (aqiPM10 >= 0 ? String(aqiPM10) : String("null")) + ",";
   out += "\"aqi_pm10_category\":\"" + String(getAQICategory(aqiPM10)) + "\",";
-
+#endif
   out += "\"sd_ok\":" + String(gSdOk ? "true" : "false") + ",";
   out += "\"cpu_temp_c\":" + String(temperatureRead(), 1) + ",";
   out += "\"uptime_s\":" + String((uint32_t)(millis() / 1000)) + ",";
@@ -1570,38 +1930,56 @@ static inline String numOrNull(float v, int digits) {
 
 static String buildBucketJson(const BucketSample& b) {
   // Full descriptive property names
+#ifdef WIND_SENSOR
   float avg_wind = (b.avgWind != 255) ? ((float)b.avgWind / 2.0f) : NAN;
   float max_wind = (b.maxWind != 255) ? ((float)b.maxWind / 2.0f) : NAN;
+#endif
+#ifdef BME280_SENSOR
   float temp_c = (b.avgTempC != -128) ? (float)b.avgTempC : NAN;
   float hum_rh = (b.avgHumRH != 255) ? (float)b.avgHumRH : NAN;
   float press_hpa = (b.avgPressHpa != -128) ? (1000.0f + (float)b.avgPressHpa) : NAN;
+#endif
 
   // Skip buckets with no valid sensor data
-  if (!isfinite(avg_wind) && !isfinite(max_wind) &&
-      !isfinite(temp_c) && !isfinite(hum_rh) && !isfinite(press_hpa)) {
+  if (
+#ifdef WIND_SENSOR
+      !isfinite(avg_wind) && !isfinite(max_wind)
+#else
+      true
+#endif
+#ifdef BME280_SENSOR
+      && !isfinite(temp_c) && !isfinite(hum_rh) && !isfinite(press_hpa)
+#endif
+    ) {
     return "";
   }
 
   String out = "{\"timestamp\":";
   out += String((uint32_t)b.startEpoch);
+#ifdef WINO_SENSOR
   out += ",\"wind_speed_avg\":";
   out += numOrNull(avg_wind, 3);
   out += ",\"wind_speed_max\":";
   out += numOrNull(max_wind, 3);
   out += ",\"wind_speed_samples\":";
   out += String(b.samples);
+#endif
+#ifdef BME280_SENSOR
   out += ",\"temperature\":";
   out += numOrNull(temp_c, 2);
   out += ",\"humidity\":";
   out += numOrNull(hum_rh, 2);
   out += ",\"pressure\":";
   out += numOrNull(press_hpa, 2);
+#endif
+#ifdef AIR_QUAL_SENSOR
   out += ",\"pm1\":";
   out += numOrNull(b.avgPM1, 1);
   out += ",\"pm25\":";
   out += numOrNull(b.avgPM25, 1);
   out += ",\"pm10\":";
   out += numOrNull(b.avgPM10, 1);
+#endif
   out += "}";
   return out;
 }
@@ -1612,38 +1990,53 @@ static String buildBucketJsonCompact(const BucketSample& b) {
   if (!timeIsValid(b.startEpoch)) return "";
 
   // Use full precision floats directly
+#ifdef WIND_SENSOR
   float avg_wind = b.avgWind;
   float max_wind = b.maxWind;
+#endif
+#ifdef BME280_SENSOR
   float temp_c = b.avgTempC;
   float hum_rh = b.avgHumRH;
   float press_hpa = b.avgPressHpa;
-
+#endif
   // Skip buckets with no valid sensor data
-  if (!isfinite(avg_wind) && !isfinite(max_wind) &&
-      !isfinite(temp_c) && !isfinite(hum_rh) && !isfinite(press_hpa)) {
+  if (true
+#ifdef WIND_SENSOR
+      && !isfinite(avg_wind) && !isfinite(max_wind)
+#endif
+#ifdef BME280_SENSOR
+      && !isfinite(temp_c) && !isfinite(hum_rh) && !isfinite(press_hpa)
+#endif
+    ) {
     return "";
   }
 
   String out = "[";
   out += String((uint32_t)b.startEpoch);
   out += ",";
+#ifdef WIND_SENSOR
   out += numOrNull(avg_wind, 3);
   out += ",";
   out += numOrNull(max_wind, 3);
   out += ",";
   out += String(b.samples);
   out += ",";
+#endif
+#ifdef BME280_SENSOR
   out += numOrNull(temp_c, 2);
   out += ",";
   out += numOrNull(hum_rh, 2);
   out += ",";
   out += numOrNull(press_hpa, 2);
   out += ",";
+#endif
+#ifdef AIR_QUAL_SENSOR
   out += numOrNull(b.avgPM1, 1);
   out += ",";
   out += numOrNull(b.avgPM25, 1);
   out += ",";
   out += numOrNull(b.avgPM10, 1);
+#endif
   out += "]";
   return out;
 }
@@ -1796,8 +2189,11 @@ void handleApiDays() {
     out += "{";
     out += "\"dayStartEpoch\":" + String((uint32_t)curDay.dayStartEpoch) + ",";
     out += "\"dayStartLocal\":\"" + fmtLocal(curDay.dayStartEpoch) + "\",";
+#ifdef WIND_SENSOR
     out += "\"avgWind\":" + (isfinite(curDay.avgWind) ? String(curDay.avgWind, 3) : String("null")) + ",";
     out += "\"maxWind\":" + (isfinite(curDay.maxWind) ? String(curDay.maxWind, 3) : String("null")) + ",";
+#endif
+#ifdef BME280_SENSOR
     out += "\"avgTemp\":" + (isfinite(curDay.avgTemp) ? String(curDay.avgTemp, 2) : String("null")) + ",";
     out += "\"minTemp\":" + (isfinite(curDay.minTemp) ? String(curDay.minTemp, 2) : String("null")) + ",";
     out += "\"maxTemp\":" + (isfinite(curDay.maxTemp) ? String(curDay.maxTemp, 2) : String("null")) + ",";
@@ -1807,12 +2203,15 @@ void handleApiDays() {
     out += "\"avgPress\":" + (isfinite(curDay.avgPress) ? String(curDay.avgPress, 2) : String("null")) + ",";
     out += "\"minPress\":" + (isfinite(curDay.minPress) ? String(curDay.minPress, 2) : String("null")) + ",";
     out += "\"maxPress\":" + (isfinite(curDay.maxPress) ? String(curDay.maxPress, 2) : String("null")) + ",";
+#endif
+#ifdef AIR_QUAL_SENSOR
     out += "\"avgPM1\":" + (isfinite(curDay.avgPM1) ? String(curDay.avgPM1, 1) : String("null")) + ",";
     out += "\"maxPM1\":" + (isfinite(curDay.maxPM1) ? String(curDay.maxPM1, 1) : String("null")) + ",";
     out += "\"avgPM25\":" + (isfinite(curDay.avgPM25) ? String(curDay.avgPM25, 1) : String("null")) + ",";
     out += "\"maxPM25\":" + (isfinite(curDay.maxPM25) ? String(curDay.maxPM25, 1) : String("null")) + ",";
     out += "\"avgPM10\":" + (isfinite(curDay.avgPM10) ? String(curDay.avgPM10, 1) : String("null")) + ",";
     out += "\"maxPM10\":" + (isfinite(curDay.maxPM10) ? String(curDay.maxPM10, 1) : String("null"));
+#endif
     out += "}";
     firstOut = false;
   }
@@ -1828,8 +2227,11 @@ void handleApiDays() {
     out += "{";
     out += "\"dayStartEpoch\":" + String((uint32_t)d.dayStartEpoch) + ",";
     out += "\"dayStartLocal\":\"" + fmtLocal(d.dayStartEpoch) + "\",";
+#ifdef WIND_SENSOR
     out += "\"avgWind\":" + (isfinite(d.avgWind) ? String(d.avgWind, 3) : String("null")) + ",";
     out += "\"maxWind\":" + (isfinite(d.maxWind) ? String(d.maxWind, 3) : String("null")) + ",";
+#endif
+#ifdef BME280_SENSOR
     out += "\"avgTemp\":" + (isfinite(d.avgTemp) ? String(d.avgTemp, 2) : String("null")) + ",";
     out += "\"minTemp\":" + (isfinite(d.minTemp) ? String(d.minTemp, 2) : String("null")) + ",";
     out += "\"maxTemp\":" + (isfinite(d.maxTemp) ? String(d.maxTemp, 2) : String("null")) + ",";
@@ -1839,12 +2241,15 @@ void handleApiDays() {
     out += "\"avgPress\":" + (isfinite(d.avgPress) ? String(d.avgPress, 2) : String("null")) + ",";
     out += "\"minPress\":" + (isfinite(d.minPress) ? String(d.minPress, 2) : String("null")) + ",";
     out += "\"maxPress\":" + (isfinite(d.maxPress) ? String(d.maxPress, 2) : String("null")) + ",";
+#endif
+#ifdef AIR_QUAL_SENSOR
     out += "\"avgPM1\":" + (isfinite(d.avgPM1) ? String(d.avgPM1, 1) : String("null")) + ",";
     out += "\"maxPM1\":" + (isfinite(d.maxPM1) ? String(d.maxPM1, 1) : String("null")) + ",";
     out += "\"avgPM25\":" + (isfinite(d.avgPM25) ? String(d.avgPM25, 1) : String("null")) + ",";
     out += "\"maxPM25\":" + (isfinite(d.maxPM25) ? String(d.maxPM25, 1) : String("null")) + ",";
     out += "\"avgPM10\":" + (isfinite(d.avgPM10) ? String(d.avgPM10, 1) : String("null")) + ",";
     out += "\"maxPM10\":" + (isfinite(d.maxPM10) ? String(d.maxPM10, 1) : String("null"));
+#endif
     out += "}";
   }
   out += "]}";
@@ -2116,8 +2521,11 @@ void saveDaySummariesCache(const DaySummary* curDay, bool hasCurDay) {
   auto writeRow = [&](const DaySummary& d){
     if (!timeIsValid(d.dayStartEpoch)) return;
     f.print((uint32_t)d.dayStartEpoch); f.print(",");
+#ifdef WIND_SENSOR
     f.print(isfinite(d.avgWind) ? String(d.avgWind,3) : String("")); f.print(",");
     f.print(isfinite(d.maxWind) ? String(d.maxWind,3) : String("")); f.print(",");
+#endif
+#ifdef BME280_SENSOR
     f.print(isfinite(d.avgTemp) ? String(d.avgTemp,2) : String("")); f.print(",");
     f.print(isfinite(d.minTemp) ? String(d.minTemp,2) : String("")); f.print(",");
     f.print(isfinite(d.maxTemp) ? String(d.maxTemp,2) : String("")); f.print(",");
@@ -2127,12 +2535,15 @@ void saveDaySummariesCache(const DaySummary* curDay, bool hasCurDay) {
     f.print(isfinite(d.avgPress) ? String(d.avgPress,2) : String("")); f.print(",");
     f.print(isfinite(d.minPress) ? String(d.minPress,2) : String("")); f.print(",");
     f.print(isfinite(d.maxPress) ? String(d.maxPress,2) : String("")); f.print(",");
+#endif
+#ifdef AIR_QUAL_SENSOR
     f.print(isfinite(d.avgPM1) ? String(d.avgPM1,1) : String("")); f.print(",");
     f.print(isfinite(d.maxPM1) ? String(d.maxPM1,1) : String("")); f.print(",");
     f.print(isfinite(d.avgPM25) ? String(d.avgPM25,1) : String("")); f.print(",");
     f.print(isfinite(d.maxPM25) ? String(d.maxPM25,1) : String("")); f.print(",");
     f.print(isfinite(d.avgPM10) ? String(d.avgPM10,1) : String("")); f.print(",");
     f.print(isfinite(d.maxPM10) ? String(d.maxPM10,1) : String(""));
+#endif
     f.print("\n");
   };
   if (hasCurDay && curDay) writeRow(*curDay);
@@ -2164,8 +2575,11 @@ bool loadDaySummariesCache() {
     DaySummary d{};
     d.dayStartEpoch = (time_t)parts[0].toInt();
     if (!timeIsValid(d.dayStartEpoch)) continue;
+#ifdef WIND_SENSOR
     d.avgWind = parts[1].length() ? parts[1].toFloat() : NAN;
     d.maxWind = parts[2].length() ? parts[2].toFloat() : NAN;
+#endif
+#ifdef BME280_SENSOR
     d.avgTemp = parts[3].length() ? parts[3].toFloat() : NAN;
     d.minTemp = parts[4].length() ? parts[4].toFloat() : NAN;
     d.maxTemp = parts[5].length() ? parts[5].toFloat() : NAN;
@@ -2176,6 +2590,8 @@ bool loadDaySummariesCache() {
     d.avgPress = (numParts > 9 && parts[9].length()) ? parts[9].toFloat() : NAN;
     d.minPress = (numParts > 10 && parts[10].length()) ? parts[10].toFloat() : NAN;
     d.maxPress = (numParts > 11 && parts[11].length()) ? parts[11].toFloat() : NAN;
+#endif
+#ifdef AIR_QUAL_SENSOR
     // PM fields (optional for backward compatibility)
     d.avgPM1 = (numParts > 12 && parts[12].length()) ? parts[12].toFloat() : NAN;
     d.maxPM1 = (numParts > 13 && parts[13].length()) ? parts[13].toFloat() : NAN;
@@ -2183,6 +2599,7 @@ bool loadDaySummariesCache() {
     d.maxPM25 = (numParts > 15 && parts[15].length()) ? parts[15].toFloat() : NAN;
     d.avgPM10 = (numParts > 16 && parts[16].length()) ? parts[16].toFloat() : NAN;
     d.maxPM10 = (numParts > 17 && parts[17].length()) ? parts[17].toFloat() : NAN;
+#endif
     gDays[gDayWrite] = d;
     gDayWrite = (gDayWrite + 1) % LogConfig::DAYS_HISTORY;
     if (gDaysCount < (uint32_t)LogConfig::DAYS_HISTORY) gDaysCount++;
@@ -2222,6 +2639,8 @@ void initSD() {
 
 // ------------------- LOOP HELPERS -------------------
 
+#ifdef WIND_SENSOR
+
 static void updateWindPPS(uint32_t msNow) {
   if (msNow - gLastPpsMillis < WindConfig::PPS_WINDOW_MS) return;
 
@@ -2254,6 +2673,10 @@ static void updateWindPPS(uint32_t msNow) {
   gLastPpsMillis = msNow;
 }
 
+#endif
+
+#ifdef BME280_SENSOR
+
 static void pollBMEIfNeeded(uint32_t msNow) {
   if (!BME280Config::ENABLE || !gBmeOk) return;
   if (msNow - gLastBmePollMillis < BME280Config::POLL_INTERVAL_MS) return;
@@ -2261,12 +2684,18 @@ static void pollBMEIfNeeded(uint32_t msNow) {
   gLastBmePollMillis += BME280Config::POLL_INTERVAL_MS;
 }
 
+#endif
+
+#ifdef AIR_QUAL_SENSOR
+
 static void pollPMSIfNeeded(uint32_t msNow) {
   if (!PMS5003Config::ENABLE) return;
   if (msNow - gLastPmsPollMillis < PMS5003Config::POLL_INTERVAL_MS) return;
   pollPMS();
   gLastPmsPollMillis += PMS5003Config::POLL_INTERVAL_MS;
 }
+
+#endif
 
 static void processBucketCatchup(time_t nowE) {
   time_t aligned = floorToBucketBoundaryLocal(nowE);
@@ -2279,20 +2708,26 @@ static void processBucketCatchup(time_t nowE) {
     finalizeCurrentBucket(gCurrentBucketStart);
 
     gCurrentBucketStart += LogConfig::BUCKET_SECONDS;
+#ifdef WIND_SENSOR
     gBucketWindSum = 0.0f;
     gBucketWindMax1 = 0.0f;
     gBucketWindMax2 = 0.0f;
     gBucketSamples = 0;
     gBucketPulseCount = 0;
     gBucketPulseElapsedMs = 0;
+#endif
+#ifdef BME280_SENSOR
     gBucketTempSum = 0.0f;
     gBucketHumSum = 0.0f;
     gBucketPressSumPa = 0.0f;
     gBucketEnvSamples = 0;
+#endif
+#ifdef AIR_QUAL_SENSOR
     gBucketPM1Sum = 0.0f;
     gBucketPM25Sum = 0.0f;
     gBucketPM10Sum = 0.0f;
     gBucketPmSamples = 0;
+#endif
     bucketsProcessed++;
     if ((bucketsProcessed % 2) == 0) {
       server.handleClient();
@@ -2314,8 +2749,10 @@ void setup() {
   gDayWrite = 0;
   gDaysCount = 0;
 
+#ifdef WIND_SENSOR
   // Set up pulse pin but don't attach interrupt yet to avoid counting noise during WiFi init
   pinMode(WindConfig::PULSE_PIN, INPUT_PULLUP);
+#endif
 
   WiFi.mode(WIFI_STA);
   WiFiManager wm;
@@ -2330,6 +2767,7 @@ void setup() {
     ESP.restart();
   }
 
+#ifdef BME280_SENSOR
   Wire.begin();
   if (BME280Config::ENABLE) {
     gBmeOk = bme.begin(BME280Config::I2C_ADDR_PRIMARY);
@@ -2346,13 +2784,16 @@ void setup() {
       pollBME();
     }
   }
+#endif
 
+#ifdef AIR_QUAL_SENSOR
   // Initialize PMS5003 on Serial2
   if (PMS5003Config::ENABLE) {
     Serial2.begin(9600, SERIAL_8N1, PMS5003Config::RX_PIN, PMS5003Config::TX_PIN);
     gPmsOk = true;  // Sensor ready (no handshake needed)
     Serial.println("PMS5003 UART initialized");
   }
+#endif
 
   initSD();
 
@@ -2373,8 +2814,12 @@ void setup() {
   startBucketAt(aligned);
 
   gLastPpsMillis = millis();
+#ifdef BME280_SENSOR
   gLastBmePollMillis = millis();
+#endif
+#ifdef AIR_QUAL_SENSOR
   gLastPmsPollMillis = millis();
+#endif
 
   // routes
   server.on("/", handleRoot);
@@ -2407,10 +2852,12 @@ void setup() {
   });
   ArduinoOTA.begin();
 
+#ifdef WIND_SENSOR
   // Attach pulse interrupt after all initialization to avoid counting noise during boot
   gLastPulseMicros = micros();
   gPulseCount = 0;
   attachInterrupt(digitalPinToInterrupt(WindConfig::PULSE_PIN), onPulse, RISING);
+#endif
 }
 
 void loop() {
@@ -2419,9 +2866,15 @@ void loop() {
 
   uint32_t msNow = millis();
 
+#ifdef WIND_SENSOR
   updateWindPPS(msNow);
+#endif
+#ifdef BME280_SENSOR
   pollBMEIfNeeded(msNow);
+#endif
+#ifdef AIR_QUAL_SENSOR
   pollPMSIfNeeded(msNow);
+#endif
 
   time_t nowE = epochNow();
   maybeRolloverDay(nowE);
