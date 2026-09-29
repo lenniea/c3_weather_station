@@ -462,11 +462,11 @@ void IRAM_ATTR onPulse() {
   uint32_t now = micros();
   uint32_t elapsed = now - gLastPulseMicros;
 
-  // Debounce: ignore pulses closer than 2ms (2000 microseconds)
-  if (elapsed < 2000) return;
-
-  gLastPulseMicros = now;
-  gPulseCount++;
+  // Debounce: ignore pulses closer than DEBOUNCE_US microseconds
+  if (elapsed >= WindConfig::DEBOUNCE_US) {
+    gLastPulseMicros = now;
+    gPulseCount++;
+  }
 }
 
 // ------------------- TIME HELPERS -------------------
@@ -2321,8 +2321,15 @@ void handleApiUiFiles() {
   String out = "{\"ok\":true,\"files\":[";
   bool first = true;
 
-  const char* webFiles[] = {"/web/index.html", "/web/app.js"};
-  for (int i = 0; i < 2; i++) {
+  #define ACOUNT(a)   (sizeof(a)/sizeof(a[0]))
+
+  const char* webFiles[] = {
+    "/web/index.html",
+    "/web/app.js",
+    "/web/app_base.js",
+    "/web/app_base_clean.js"
+  };
+  for (int i = 0; i < ACOUNT(webFiles); i++) {
     const char* path = webFiles[i];
     if (LittleFS.exists(path)) {
       File f = LittleFS.open(path, FILE_READ);
@@ -2638,35 +2645,34 @@ bool initSD() {
 #ifdef WIND_SENSOR
 
 static void updateWindPPS(uint32_t msNow) {
-  if (msNow - gLastPpsMillis < WindConfig::PPS_WINDOW_MS) return;
-
-  uint32_t elapsedMs = msNow - gLastPpsMillis;
-
-  uint32_t delta;
   noInterrupts();
-  delta = gPulseCount;
-  gPulseCount = 0;
-  interrupts();
+  uint32_t elapsedMs = msNow - gLastPpsMillis;
+  if (elapsedMs >= WindConfig::PPS_WINDOW_MS) {
 
-  float pps = (elapsedMs > 0) ? (delta * 1000.0f / (float)elapsedMs) : 0.0f;
-  float ms = pps * WindConfig::PPS_TO_MS;
+    uint32_t delta = gPulseCount;
+    gPulseCount = 0;
 
-  gNowWindMS = ms;
-  if (gNowWindMS > gBucketWindMax1) {
-    gBucketWindMax2 = gBucketWindMax1;
-    gBucketWindMax1 = gNowWindMS;
-  } else if (gNowWindMS > gBucketWindMax2) {
-    gBucketWindMax2 = gNowWindMS;
+    float pps = (delta * 1000.0f / (float)elapsedMs);
+    float ms = pps * WindConfig::PPS_TO_MS;
+
+    gNowWindMS = ms;
+    if (gNowWindMS > gBucketWindMax1) {
+      gBucketWindMax2 = gBucketWindMax1;
+      gBucketWindMax1 = gNowWindMS;
+    } else if (gNowWindMS > gBucketWindMax2) {
+      gBucketWindMax2 = gNowWindMS;
+    }
+
+    gBucketPulseCount += delta;
+    gBucketPulseElapsedMs += elapsedMs;
+
+    // Sample wind into bucket immediately after calculation
+    gBucketWindSum += gNowWindMS;
+    gBucketSamples++;
+
+    gLastPpsMillis = msNow;
   }
-
-  gBucketPulseCount += delta;
-  gBucketPulseElapsedMs += elapsedMs;
-
-  // Sample wind into bucket immediately after calculation
-  gBucketWindSum += gNowWindMS;
-  gBucketSamples++;
-
-  gLastPpsMillis = msNow;
+  interrupts();
 }
 
 #endif
@@ -2751,6 +2757,7 @@ void setup() {
 #endif
 
   WiFi.mode(WIFI_STA);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
   WiFiManager wm;
   wm.setConfigPortalTimeout(180);
   if (!wm.autoConnect("Anemometer-Setup")) {
@@ -2852,7 +2859,8 @@ void setup() {
   // Attach pulse interrupt after all initialization to avoid counting noise during boot
   gLastPulseMicros = micros();
   gPulseCount = 0;
-  attachInterrupt(digitalPinToInterrupt(WindConfig::PULSE_PIN), onPulse, RISING);
+  attachInterrupt(digitalPinToInterrupt(WindConfig::PULSE_PIN), onPulse, FALLING);
+  Serial.println("Attach Wind Pulse interrupt");
 #endif
 }
 
