@@ -44,6 +44,51 @@ static const char* API_PASSWORD = "ChangeMe";
 //Over the air update password
 static const char* OTA_PASSWORD = "PleaseChangeMe";
 
+#ifdef RGB_BUILTIN
+
+#include <Adafruit_NeoPixel.h>
+
+#define RGB_PIN   10
+#define NUMPIXELS  1   // Only 1 onboard NeoPixel
+
+// Initialize the NeoPixel strip object with RGB color order
+Adafruit_NeoPixel ws2812(NUMPIXELS, RGB_PIN, NEO_RGB | NEO_KHZ800);
+
+void initRGB() {
+  ws2812.begin();           // INITIALIZE NeoPixel strip object
+  ws2812.setBrightness(30); // Set brightness (0 to 255)
+  ws2812.clear();
+  ws2812.show();
+}
+
+// Primary colors
+#define RGB_BLACK   0x000000
+
+#define RGB_RED     0x00FF00
+#define RGB_GREEN   0xFF0000
+#define RGB_BLUE    0x0000FF
+
+#define RGB_WHITE   0xFFFFFF
+
+// Secondary colors
+#define RGB_YELLOW  0xFFFF00
+#define RGB_MAGENTA 0x00FFFF
+#define RGB_CYAN    0xFF00FF
+
+void setRGB(uint32_t rgb)
+{
+  ws2812.setPixelColor(0, rgb);
+  ws2812.show();
+}
+
+#endif // RGB_BUILTIN
+
+void reportError(const char* msg) {
+  Serial.println(msg);
+#ifdef RGB_BUILTIN
+  setRGB(RGB_RED);
+#endif
+}
 
 #ifdef WIND_SENSOR
 
@@ -2751,6 +2796,10 @@ void setup() {
   gDayWrite = 0;
   gDaysCount = 0;
 
+#ifdef RGB_BUILTIN
+  initRGB();
+#endif
+
 #ifdef WIND_SENSOR
   // Set up pulse pin but don't attach interrupt yet to avoid counting noise during WiFi init
   pinMode(WindConfig::PULSE_PIN, INPUT_PULLUP);
@@ -2759,7 +2808,10 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setTxPower(WIFI_POWER_8_5dBm);
   WiFiManager wm;
-  wm.setConfigPortalTimeout(180);
+  wm.setConfigPortalTimeout(NetworkConfig::AP_TIMEOUT_S);
+  #ifdef RGB_BUILTIN
+    setRGB(RGB_YELLOW);
+  #endif
   if (!wm.autoConnect("Anemometer-Setup")) {
     delay(500);
     ESP.restart();
@@ -2769,6 +2821,10 @@ void setup() {
     delay(500);
     ESP.restart();
   }
+
+#ifdef RGB_BUILTIN
+  setRGB(RGB_GREEN);
+#endif
 
 #ifdef BME280_SENSOR
   Wire.begin();
@@ -2845,6 +2901,9 @@ void setup() {
   server.on("/upload", HTTP_POST, handleUploadComplete, handleUploadData);
 
   server.begin();
+#ifdef RGB_BUILTIN
+  setRGB(RGB_BLUE);
+#endif
 
   ArduinoOTA.setHostname("anemometer");
   ArduinoOTA.setPassword(OTA_PASSWORD);
