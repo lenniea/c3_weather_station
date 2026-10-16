@@ -169,6 +169,7 @@ void resetEnvSamples(void)
 
 void pollEnv(uint32_t msNow)
 {
+  gLastEnvPoll = msNow;
 #ifdef BME280_SENSOR
   if (!gBmeOk)
     return;
@@ -196,7 +197,6 @@ void pollEnv(uint32_t msNow)
 #else
 #error Neither Sensor is defined in config.h
 #endif
-  gLastEnvPoll = msNow;
   // Accumulate for per-bucket averages
 #ifdef TEMP_SENSOR
   gBucketTempSum += gTempC;
@@ -228,11 +228,16 @@ void pollEnvIfNeeded(uint32_t msNow)
 
 bool initEnvSensors(uint32_t msNow)
 {
-  Wire.begin();
+  Wire.begin(D8, D9);   // Use default SDA, SCL pins
 #ifdef BME280_SENSOR
   gBmeOk = bme.begin(BME280Config::I2C_ADDR_PRIMARY);
-  if (!gBmeOk)
-    gBmeOk = bme.begin(BME280Config::I2C_ADDR_PRIMARY);
+  if (!gBmeOk) {
+    Serial.println("ERROR initializing BME PRIMARY");
+    gBmeOk = bme.begin(BME280Config::I2C_ADDR_FALLBACK);
+    if (!gBmeOk) {
+      Serial.println("ERROR initialining BME FALLBACK");
+    }
+  }
   if (gBmeOk)
   {
     bme.setSampling(
@@ -244,8 +249,12 @@ bool initEnvSensors(uint32_t msNow)
         Adafruit_BME280::STANDBY_MS_500);
 #elif defined(BMP280_SENSOR)
   gBmpOk = bmp.begin(BMP280Config::I2C_ADDR_PRIMARY);
-  if (!gBmpOk)
-    gBmpOk = bmp.begin(BMP280Config::I2C_ADDR_PRIMARY);
+  if (!gBmpOk) {
+    Serial.println("ERROR initializing BMP PRIMARY");
+    gBmpOk = bmp.begin(BMP280Config::I2C_ADDR_FALLBACK);
+    if (!gBmpOk) {
+      Serial.println("ERROR initializing BMP FALLBACK");
+    }
   if (gBmpOk)
   {
     bmp.setSampling(Adafruit_BMP280::MODE_NORMAL,     /* Operating Mode. */
@@ -254,7 +263,6 @@ bool initEnvSensors(uint32_t msNow)
                     Adafruit_BMP280::FILTER_X16,      /* Filtering. */
                     Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
 #endif
-    uint32_t msNow = millis();
     pollEnv(msNow);
   }
 }

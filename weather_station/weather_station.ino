@@ -21,6 +21,7 @@
 */
 
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <WebServer.h>
 #include <WiFiManager.h>
 #include <time.h>
@@ -129,7 +130,7 @@ namespace NetworkConfig {
   static const char* NTP_SERVER_2 = "time.google.com";
   static const char* NTP_SERVER_3 = "time.windows.com";
   static const char* TIMEZONE = "PST8PDT"; // Pacific Daylight Savings Time
-  static const char* AP_NAME = "Anemometer-Setup";
+  static const char* AP_NAME = "Weather-Setup";
   static constexpr uint32_t AP_TIMEOUT_S = 180;
 }
 
@@ -2541,6 +2542,15 @@ static void processBucketCatchup(time_t nowE) {
 }
 
 // ------------------- SETUP / LOOP -------------------
+WiFiManager wm;
+
+void initWiFiManager() {
+  WiFi.mode(WIFI_STA);
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);
+  setRGB(RGB_YELLOW);
+
+  wm.setConfigPortalTimeout(120);
+}
 
 void setup() {
   Serial.begin(115200);
@@ -2561,20 +2571,24 @@ void setup() {
   pinMode(WindConfig::PULSE_PIN, INPUT_PULLUP);
 #endif
 
-  WiFi.mode(WIFI_STA);
-  WiFi.setTxPower(WIFI_POWER_8_5dBm);
-  WiFiManager wm;
-  wm.setConfigPortalTimeout(NetworkConfig::AP_TIMEOUT_S);
-  #ifdef RGB_BUILTIN
-    setRGB(RGB_YELLOW);
-  #endif
-  if (!wm.autoConnect("Anemometer-Setup")) {
-    delay(500);
-    ESP.restart();
+  // 1. Mount LittleFS partition and read config parameters
+  gSdOk = LittleFS.begin(true);
+  if (gSdOk) {
+    Serial.println("LittleFS initialized");
+  }
+
+  // 2. Setup standard WiFiManager parameters
+  initWiFiManager();
+
+  if (!wm.autoConnect("Weather-Setup")) {
+      setRGB(RGB_RED); // Solid Red on catastrophic boot failure
+      delay(2000);
+      ESP.restart();
   }
 
   if (!syncTimeWithNTP()) {
     delay(500);
+    reportError("Can't sync time with NTP server!");
     ESP.restart();
   }
 
@@ -2582,17 +2596,25 @@ void setup() {
   setRGB(RGB_GREEN);
 #endif
 
-#if defined(BME280_SENSOR) || defined(BMP280_SENSOR)
   uint32_t msNow = millis();
+  Serial.println("Initializing sensors");
+#if defined(BME280_SENSOR) || defined(BMP280_SENSOR)
   gEnvOk = initEnvSensors(msNow);
+  if (!gEnvOk) {
+    reportError("Error initializing Environmental Sensors");
+  }
 #endif
 
 #ifdef AIR_QUAL_SENSOR
   initAirQuality(msNow);
 #endif
 
-  gSdOk = initSD();
+  Serial.println("Start DNS server");
+  if (MDNS.begin("weather")) {
+      Serial.println("mDNS started: http://weather.local");
+  }
 
+  // Synch with files off LittleFS Storage
   time_t nowE = epochNow();
   gTodayMidnightEpoch = localMidnight(nowE);
   deleteOldDailyFileIfNeeded(gTodayMidnightEpoch);
@@ -2630,11 +2652,11 @@ void setup() {
   server.on("/upload", HTTP_POST, handleUploadComplete, handleUploadData);
 
   server.begin();
+  Serial.println("Starting web server");
 #ifdef RGB_BUILTIN
   setRGB(RGB_BLUE);
 #endif
 
-  ArduinoOTA.setHostname("anemometer");
   ArduinoOTA.setPassword(OTA_PASSWORD);
   ArduinoOTA.onStart([]() {
   });
@@ -2644,7 +2666,7 @@ void setup() {
   ArduinoOTA.begin();
 
 #ifdef WIND_SENSOR
-  // Attach pulse interrupt after all initialization to avoid counting noise during boot
+  // Attach pulse interrupt after all initalization to avoid counting noise during boot
   gLastPulseMicros = micros();
   gPulseCount = 0;
   attachInterrupt(digitalPinToInterrupt(WindConfig::PULSE_PIN), onPulse, FALLING);
