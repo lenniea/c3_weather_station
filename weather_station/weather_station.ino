@@ -40,6 +40,9 @@
 #ifdef AIR_QUAL_SENSOR
   #include "air_quality.h"
 #endif
+#ifdef WIND_SENSOR
+  #include "wind_sensor.h"
+#endif
 #include "upload_page.h"
 #include "api_help_page.h"
 
@@ -102,18 +105,6 @@ void reportError(const char* msg) {
   setRGB(RGB_RED);
 #endif
 }
-
-#ifdef WIND_SENSOR
-
-// Wind Sensor (Pulse-based Anemometer)
-namespace WindConfig {
-  static constexpr int   PULSE_PIN = 3;                 // GPIO pin
-  static constexpr float PPS_TO_MS = 1.75f / 20.0f;     // Calibration: 20pps = 1.75m/s
-  static constexpr uint32_t PPS_WINDOW_MS = 1000;       // Calculate every 1 second
-  static constexpr uint32_t DEBOUNCE_US = 2000;         // 2ms debounce
-}
-
-#endif
 
 // Data Logging
 namespace LogConfig {
@@ -336,30 +327,11 @@ static DaySummary gDays[LogConfig::DAYS_HISTORY];
 static int gDayWrite = 0;
 static uint32_t gDaysCount = 0;
 
-// wind pulses
-static volatile uint32_t gPulseCount = 0;
-static volatile uint32_t gLastPulseMicros = 0;
-static float gNowWindMS = 0.0f;
-
 // timing / bucket accumulators
-static uint32_t gLastPpsMillis = 0;
 static time_t   gCurrentBucketStart = 0;
-#ifdef WIND_SENSOR
-static float    gBucketWindSum = 0.0f;
-static float    gBucketWindMax1 = 0.0f; // highest observed in bucket
-static float    gBucketWindMax2 = 0.0f; // second-highest observed in bucket
-static uint32_t gBucketSamples = 0;
-static uint32_t gBucketPulseCount = 0;
-static uint32_t gBucketPulseElapsedMs = 0;
-#endif
 
 // daily rollup
 static time_t   gTodayMidnightEpoch = 0;
-static float    gTodaySumOfBucketAvgs = 0.0f;
-#ifdef WIND_SENSOR
-static uint32_t gTodayBucketCount = 0;
-static float    gTodayMax = 0.0f;
-#endif
 
 // Auth / rate limit for password-protected endpoints
 static int      gPwAttempts = 0;
@@ -369,9 +341,7 @@ static time_t   gPwWindowStart = 0;
 
 static void clearTodayAggregates() {
 #ifdef WIND_SENSOR
-  gTodaySumOfBucketAvgs = 0.0f;
-  gTodayBucketCount = 0;
-  gTodayMax = 0.0f;
+  clearWindToday();
 #endif
   clearEnvToday();
 #ifdef AIR_QUAL_SENSOR
@@ -389,18 +359,6 @@ static uint32_t gFilesCacheDataMs = 0;
 
 // Web
 static WebServer server(80);
-
-// ------------------- ISR -------------------
-void IRAM_ATTR onPulse() {
-  uint32_t now = micros();
-  uint32_t elapsed = now - gLastPulseMicros;
-
-  // Debounce: ignore pulses closer than DEBOUNCE_US microseconds
-  if (elapsed >= WindConfig::DEBOUNCE_US) {
-    gLastPulseMicros = now;
-    gPulseCount++;
-  }
-}
 
 // ------------------- TIME HELPERS -------------------
 static inline bool timeIsValid(time_t t) { return t > 1577836800; } // > 2020-01-01
@@ -745,13 +703,7 @@ void pushBucketSample(const BucketSample& b) {
 static void accumulateTodayFromBucket(const BucketSample& b) {
 #ifdef WIND_SENSOR
   // Use full precision floats for daily summary
-  if (isfinite(b.avgWind)) {
-    gTodaySumOfBucketAvgs += b.avgWind;
-    gTodayBucketCount++;
-  }
-  if (isfinite(b.maxWind)) {
-    if (b.maxWind > gTodayMax) gTodayMax = b.maxWind;
-  }
+  updateWind(b.avgWind, b.maxWind);
 #endif
   updateEnvMinMax(
 #ifdef TEMP_SENSOR
@@ -920,18 +872,9 @@ static void computeBucketSample(BucketSample& b, time_t bucketStart) {
 #endif
 #ifdef WIND_SENSOR
   // Wind
-  float avgWindMs = 0.0f;
-  if (gBucketPulseElapsedMs > 0) {
-    float ppsAvg = (float)gBucketPulseCount * 1000.0f / (float)gBucketPulseElapsedMs;
-    avgWindMs = ppsAvg * WindConfig::PPS_TO_MS;
-  } else if (gBucketSamples > 0) {
-    avgWindMs = gBucketWindSum / (float)gBucketSamples;
-  }
+  float avgWindMs = computeWind();
   b.avgWind = avgWindMs;
-
-  float maxWindMs = gBucketWindMax1;
-  if (maxWindMs < avgWindMs) maxWindMs = avgWindMs;
-  b.maxWind = maxWindMs;
+  b.maxWind = computeMaxWind(avgWindMs);
 #endif
 #ifdef AIR_QUAL_SENSOR
   // PM averages
@@ -1661,7 +1604,7 @@ void handleApiReboot() {
 
 void handleApiNow() {
 #ifdef WIND_SENSOR
-  float pps = (WindConfig::PPS_TO_MS > 0.0f) ? (gNowWindMS / WindConfig::PPS_TO_MS) : 0.0f;
+  float pps = calcWindPps();
 #endif
   time_t nowE = epochNow();
 #ifdef PRESS_SENSOR
@@ -2474,41 +2417,6 @@ bool initSD() {
 
 // ------------------- LOOP HELPERS -------------------
 
-#ifdef WIND_SENSOR
-
-static void updateWindPPS(uint32_t msNow) {
-  noInterrupts();
-  uint32_t elapsedMs = msNow - gLastPpsMillis;
-  if (elapsedMs >= WindConfig::PPS_WINDOW_MS) {
-
-    uint32_t delta = gPulseCount;
-    gPulseCount = 0;
-
-    float pps = (delta * 1000.0f / (float)elapsedMs);
-    float ms = pps * WindConfig::PPS_TO_MS;
-
-    gNowWindMS = ms;
-    if (gNowWindMS > gBucketWindMax1) {
-      gBucketWindMax2 = gBucketWindMax1;
-      gBucketWindMax1 = gNowWindMS;
-    } else if (gNowWindMS > gBucketWindMax2) {
-      gBucketWindMax2 = gNowWindMS;
-    }
-
-    gBucketPulseCount += delta;
-    gBucketPulseElapsedMs += elapsedMs;
-
-    // Sample wind into bucket immediately after calculation
-    gBucketWindSum += gNowWindMS;
-    gBucketSamples++;
-
-    gLastPpsMillis = msNow;
-  }
-  interrupts();
-}
-
-#endif
-
 static void processBucketCatchup(time_t nowE) {
   time_t aligned = floorToBucketBoundaryLocal(nowE);
   if (!timeIsValid(gCurrentBucketStart)) startBucketAt(aligned);
@@ -2567,8 +2475,7 @@ void setup() {
 #endif
 
 #ifdef WIND_SENSOR
-  // Set up pulse pin but don't attach interrupt yet to avoid counting noise during WiFi init
-  pinMode(WindConfig::PULSE_PIN, INPUT_PULLUP);
+  setupWindPin();
 #endif
 
   // 1. Mount LittleFS partition and read config parameters
@@ -2666,11 +2573,7 @@ void setup() {
   ArduinoOTA.begin();
 
 #ifdef WIND_SENSOR
-  // Attach pulse interrupt after all initalization to avoid counting noise during boot
-  gLastPulseMicros = micros();
-  gPulseCount = 0;
-  attachInterrupt(digitalPinToInterrupt(WindConfig::PULSE_PIN), onPulse, FALLING);
-  Serial.println("Attach Wind Pulse interrupt");
+  initWindSensor();   // Do this last to prevent counting spurious Pin interrupts
 #endif
 }
 
