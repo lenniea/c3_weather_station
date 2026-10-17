@@ -2502,24 +2502,22 @@ void setup() {
 #ifdef RGB_BUILTIN
   setRGB(RGB_GREEN);
 #endif
-
+  Serial.println("Start DNS server");
+  if (MDNS.begin("weather")) {
+      Serial.println("mDNS started: http://weather.local");
+  }
   uint32_t msNow = millis();
   Serial.println("Initializing sensors");
 #if defined(BME280_SENSOR) || defined(BMP280_SENSOR)
   gEnvOk = initEnvSensors(msNow);
   if (!gEnvOk) {
-    reportError("Error initializing Environmental Sensors");
+    reportError("Error init Environmental Sensors");
   }
 #endif
 
 #ifdef AIR_QUAL_SENSOR
   initAirQuality(msNow);
 #endif
-
-  Serial.println("Start DNS server");
-  if (MDNS.begin("weather")) {
-      Serial.println("mDNS started: http://weather.local");
-  }
 
   // Synch with files off LittleFS Storage
   time_t nowE = epochNow();

@@ -232,10 +232,10 @@ bool initEnvSensors(uint32_t msNow)
 #ifdef BME280_SENSOR
   gBmeOk = bme.begin(BME280Config::I2C_ADDR_PRIMARY);
   if (!gBmeOk) {
-    Serial.println("ERROR initializing BME PRIMARY");
+    Serial.println("ERROR init BME PRIMARY");
     gBmeOk = bme.begin(BME280Config::I2C_ADDR_FALLBACK);
     if (!gBmeOk) {
-      Serial.println("ERROR initialining BME FALLBACK");
+      Serial.println("ERROR init BME FALLBACK");
     }
   }
   if (gBmeOk)
@@ -247,13 +247,16 @@ bool initEnvSensors(uint32_t msNow)
         Adafruit_BME280::SAMPLING_X1,
         Adafruit_BME280::FILTER_X16,
         Adafruit_BME280::STANDBY_MS_500);
+    pollEnv(msNow);
+  }
+  return gBmeOk;
 #elif defined(BMP280_SENSOR)
   gBmpOk = bmp.begin(BMP280Config::I2C_ADDR_PRIMARY);
   if (!gBmpOk) {
-    Serial.println("ERROR initializing BMP PRIMARY");
+    Serial.println("ERROR init BMP PRIMARY");
     gBmpOk = bmp.begin(BMP280Config::I2C_ADDR_FALLBACK);
     if (!gBmpOk) {
-      Serial.println("ERROR initializing BMP FALLBACK");
+      Serial.println("ERROR init BMP FALLBACK");
     }
   if (gBmpOk)
   {
@@ -262,7 +265,8 @@ bool initEnvSensors(uint32_t msNow)
                     Adafruit_BMP280::SAMPLING_X16,    /* Pressure oversampling */
                     Adafruit_BMP280::FILTER_X16,      /* Filtering. */
                     Adafruit_BMP280::STANDBY_MS_500); /* Standby time. */
-#endif
     pollEnv(msNow);
   }
+  return gBmpOk;
+#endif
 }
