@@ -1,23 +1,14 @@
 #include <Arduino.h>
 #include "config.h"
 #include "wind_sensor.h"
+#include "data_log.h"
 
 #ifdef WIND_SENSOR
-float    gBucketWindSum = 0.0f;
-float    gBucketWindMax1 = 0.0f; // highest observed in bucket
-float    gBucketWindMax2 = 0.0f; // second-highest observed in bucket
-uint32_t gBucketSamples = 0;
-uint32_t gBucketPulseCount = 0;
-uint32_t gBucketPulseElapsedMs = 0;
-
-uint32_t gTodayBucketCount = 0;
-float    gTodayMax = 0.0f;
-uint32_t gLastPpsMillis = 0;
-float    gTodaySumOfBucketAvgs = 0.0f;
 
 // wind pulses
 volatile uint32_t gPulseCount = 0;
 volatile uint32_t gLastPulseMicros = 0;
+
 float gNowWindMS = 0.0f;
 
 // Wind Sensor (Pulse-based Anemometer)
@@ -32,6 +23,15 @@ void clearWindToday(void) {
   gTodaySumOfBucketAvgs = 0.0f;
   gTodayBucketCount = 0;
   gTodayMax = 0.0f;
+}
+
+void clearWindSamples(void) {
+  gBucketWindSum = 0.0f;
+  gBucketWindMax1 = 0.0f;
+  gBucketWindMax2 = 0.0f;
+  gBucketSamples = 0;
+  gBucketPulseCount = 0;
+  gBucketPulseElapsedMs = 0;
 }
 
 void updateWind(float avgWind, float maxWind) {

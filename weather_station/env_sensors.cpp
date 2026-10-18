@@ -1,5 +1,6 @@
 #include "config.h"
 #include "env_sensors.h"
+#include "data_log.h"
 
 #ifdef BME280_SENSOR
 
@@ -38,36 +39,6 @@ static Adafruit_BMP280 bmp;
 bool gBmpOk = false;
 
 #endif
-
-//
-//    = = = = =   G L O B A L   V A R I A B L E S   E X P O R T E D   = = = = =
-//
-
-#ifdef TEMP_SENSOR
-float gTempC = NAN;
-float gBucketTempSum = 0.0f;
-float gTodayTempSum = 0.0f;
-uint32_t gTodayTempCount = 0;
-float gTodayTempMin = NAN;
-float gTodayTempMax = NAN;
-#endif
-#ifdef HUMID_SENSOR
-float gHumRH = NAN;
-float gBucketHumSum = 0.0f;
-float gTodayHumSum = 0.0f;
-uint32_t gTodayHumCount = 0;
-float gTodayHumMin = NAN;
-float gTodayHumMax = NAN;
-#endif
-#ifdef PRESS_SENSOR
-float gPressurePa = NAN;
-float gBucketPressSumPa = 0.0f;
-float gTodayPressSum = 0.0f;
-uint32_t gTodayPressCount = 0;
-float gTodayPressMin = NAN;
-float gTodayPressMax = NAN;
-#endif
-uint32_t gBucketEnvSamples = 0;
 
 static uint32_t gLastEnvPoll = 0;
 
@@ -153,7 +124,7 @@ void updateEnvMinMax(float avgTempC, float avgHumRH, float avgPressHpa)
 #endif
 }
 
-void resetEnvSamples(void)
+void clearEnvSamples(void)
 {
 #ifdef TEMP_SENSOR
   gBucketTempSum = 0.0f;
