@@ -30,12 +30,15 @@
 
 #include <SPI.h>
 #include <LittleFS.h>
+#ifdef SUPPORT_OTA
 #include <ArduinoOTA.h>
+#endif
 #include <pgmspace.h>
 
 #include <vector>
 #include <algorithm>
 #include "config.h"
+#include "web_server.h"
 #include "env_sensors.h"
 #ifdef AIR_QUAL_SENSOR
   #include "air_quality.h"
@@ -43,8 +46,6 @@
 #ifdef WIND_SENSOR
   #include "wind_sensor.h"
 #endif
-#include "upload_page.h"
-#include "api_help_page.h"
 
 // ------------------- FORWARD DECLARATIONS -------------------
 
@@ -99,11 +100,15 @@ void setRGB(uint32_t rgb)
 
 #endif // RGB_BUILTIN
 
-void reportError(const char* msg) {
+void reportMessage(uint32_t rgb, const char* msg) {
   Serial.println(msg);
 #ifdef RGB_BUILTIN
-  setRGB(RGB_RED);
+  setRGB(rgb);
 #endif
+}
+
+void reportError(const char* errmsg) {
+    reportMessage(RGB_RED, errmsg);
 }
 
 // Data Logging
@@ -352,13 +357,10 @@ static void clearTodayAggregates() {
 static bool gEnvOk = false;
 
 // SD status
-static bool gSdOk = false;
+bool gSdOk = false;
 static constexpr uint32_t FILES_CACHE_TTL_MS = 30000; // 30s reuse to avoid slow SD scans on refresh
 static String gFilesCacheDataJson;
 static uint32_t gFilesCacheDataMs = 0;
-
-// Web
-static WebServer server(80);
 
 // ------------------- TIME HELPERS -------------------
 static inline bool timeIsValid(time_t t) { return t > 1577836800; } // > 2020-01-01
@@ -1475,68 +1477,6 @@ void handleDownloadZip() {
   server.sendContent("");  // End chunked transfer
 }
 
-// ------------------- WEB UI + API -------------------
-
-void handleRoot() {
-  if (gSdOk && LittleFS.exists("/web/index.html")) {
-    File f = LittleFS.open("/web/index.html", FILE_READ);
-    if (f) {
-      server.streamFile(f, "text/html");
-      f.close();
-      return;
-    }
-  }
-
-  const char* fallbackHtml = R"HTML(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Weather Station - Setup Required</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 20px; max-width: 600px; }
-    h1 { color: #333; }
-    a { color: #0275d8; text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    ul { line-height: 1.8; }
-  </style>
-</head>
-<body>
-  <h1>Weather Station - Setup Required</h1>
-  <p>Web interface files not found on SD card.</p>
-  <ul>
-    <li><a href="/upload">Upload UI files (index.html, app.js)</a></li>
-    <li><a href="/api/now">View current sensor data (JSON)</a></li>
-    <li><a href="/api/buckets">View bucket data (JSON)</a></li>
-    <li><a href="/api/days">View daily summaries (JSON)</a></li>
-    <li><a href="/api/config">View configuration (JSON)</a></li>
-    <li><a href="/api_help">API documentation</a></li>
-  </ul>
-</body>
-</html>
-)HTML";
-
-  server.send(200, "text/html", fallbackHtml);
-}
-
-void handleApiHelp() {
-  server.send_P(200, "text/html", API_HELP_HTML);
-}
-
-void handleRootJs() {
-  if (gSdOk && LittleFS.exists("/web/app.js")) {
-    File f = LittleFS.open("/web/app.js", FILE_READ);
-    if (f) {
-      server.streamFile(f, "application/javascript");
-      f.close();
-      return;
-    }
-  }
-
-  server.send(200, "application/javascript", "console.log('app.js not found on SD card');");
-}
-
 void handleApiClearData() {
   String pw = server.arg("pw");
   bool rateLimited = false;
@@ -1602,7 +1542,7 @@ void handleApiReboot() {
   ESP.restart();
 }
 
-void handleApiNow() {
+String buildApiNow(void) {
 #ifdef WIND_SENSOR
   float pps = calcWindPps();
 #endif
@@ -1652,7 +1592,7 @@ void handleApiNow() {
   out += "\"free_heap\":" + String(ESP.getFreeHeap()) + ",";
   out += "\"heap_size\":" + String(ESP.getHeapSize());
   out += "}";
-  server.send(200, "application/json", out);
+  return out;
 }
 
 static inline String numOrNull(float v, int digits) {
@@ -1936,7 +1876,7 @@ void handleApiBucketsCompact() {
   server.sendContent("]}");
 }
 
-void handleApiDays() {
+String buildApiDays(void) {
   String out;
   out.reserve(8 * 1024);
   out += "{";
@@ -2020,10 +1960,10 @@ void handleApiDays() {
     out += "}";
   }
   out += "]}";
-  server.send(200, "application/json", out);
+  return out;
 }
 
-void handleApiConfig() {
+String buildApiConfig() {
   String out;
   out.reserve(4096);
   out = "{";
@@ -2077,47 +2017,7 @@ void handleApiConfig() {
   out += "\"maxPlotPoints\":" + String(UIConfig::MAX_PLOT_POINTS);
 
   out += "}";
-  server.send(200, "application/json", out);
-}
-
-void handleApiUiFiles() {
-  if (!gSdOk) {
-    server.send(503, "application/json", "{\"ok\":false,\"error\":\"sd_not_available\"}");
-    return;
-  }
-
-  String out = "{\"ok\":true,\"files\":[";
-  bool first = true;
-
-  const char* webFiles[] = {
-    "/web/index.html",
-    "/web/app.js",
-    "/web/app_base.js",
-    "/web/app_base_clean.js"
-  };
-  for (int i = 0; i < COUNT_OF(webFiles); i++) {
-    const char* path = webFiles[i];
-    if (LittleFS.exists(path)) {
-      File f = LittleFS.open(path, FILE_READ);
-      if (f) {
-        if (!first) out += ",";
-        first = false;
-        out += "{";
-        out += "\"path\":\"" + String(path) + "\",";
-        out += "\"size\":" + String((uint32_t)f.size()) + ",";
-        out += "\"lastModified\":" + String((uint32_t)f.getLastWrite());
-        out += "}";
-        f.close();
-      }
-    }
-  }
-
-  out += "]}";
-  server.send(200, "application/json", out);
-}
-
-void handleUploadPage() {
-  server.send_P(200, "text/html", UPLOAD_HTML);
+  return out;
 }
 
 static File gUploadFile;
@@ -2443,7 +2343,9 @@ static void processBucketCatchup(time_t nowE) {
     bucketsProcessed++;
     if ((bucketsProcessed % 2) == 0) {
       server.handleClient();
+#ifdef SUPPORT_OTA
       ArduinoOTA.handle();
+#endif
       delay(0);
     }
   }
@@ -2536,32 +2438,11 @@ void setup() {
   time_t aligned = floorToBucketBoundaryLocal(nowE);
   startBucketAt(aligned);
 
-  // routes
-  server.on("/", handleRoot);
-  server.on("/root.js", handleRootJs);
-  server.on("/api/now", handleApiNow);
-  server.on("/api/buckets", handleApiBuckets);
-  server.on("/api/buckets_compact", handleApiBucketsCompact);  // Compact format for internal UI
-  server.on("/api/days", handleApiDays);
-  server.on("/api/config", handleApiConfig);
-  server.on("/api/ui_files", handleApiUiFiles);
-  server.on("/api_help", handleApiHelp);
-  server.on("/api/clear_data", HTTP_POST, handleApiClearData);
-  server.on("/api/delete", HTTP_POST, handleApiDelete);
-  server.on("/api/reboot", HTTP_POST, handleApiReboot);
+  if (initWebServer()) {
+    reportMessage(RGB_BLUE, "Web Server started!");
+  }
 
-  server.on("/api/files", handleApiFiles);
-  server.on("/download", handleDownload);
-  server.on("/download_zip", handleDownloadZip);
-  server.on("/upload", HTTP_GET, handleUploadPage);
-  server.on("/upload", HTTP_POST, handleUploadComplete, handleUploadData);
-
-  server.begin();
-  Serial.println("Starting web server");
-#ifdef RGB_BUILTIN
-  setRGB(RGB_BLUE);
-#endif
-
+#ifdef SUPPORT_OTA
   ArduinoOTA.setPassword(OTA_PASSWORD);
   ArduinoOTA.onStart([]() {
   });
@@ -2569,6 +2450,7 @@ void setup() {
     (void)error;
   });
   ArduinoOTA.begin();
+#endif
 
 #ifdef WIND_SENSOR
   initWindSensor();   // Do this last to prevent counting spurious Pin interrupts
@@ -2577,7 +2459,9 @@ void setup() {
 
 void loop() {
   server.handleClient();
+#ifdef SUPPORT_OTA
   ArduinoOTA.handle();
+#endif
 
   uint32_t msNow = millis();
 
