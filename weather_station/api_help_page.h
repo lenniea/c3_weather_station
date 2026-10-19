@@ -54,10 +54,14 @@ static const char API_HELP_HTML[] PROGMEM =
 "  \"wind_pps\": 0.7,\n"
 "  \"wind_ms\": 1.2,\n"
 #endif
-#ifdef BME280_SENSOR
 "  \"bme280_ok\": true,\n"
+#ifdef TEMP_SENSOR
 "  \"temp_c\": 23.4,\n"
+#endif
+#ifdef HUMID_SENSOR
 "  \"hum_rh\": 55.1,\n"
+#endif
+#ifdef PRESS_SENSOR
 "  \"press_hpa\": 1012.3,\n"
 #endif
 #ifdef AIR_QUAL_SENSOR
@@ -82,9 +86,13 @@ static const char API_HELP_HTML[] PROGMEM =
 #ifdef WIND_SENSOR
 "      <tr><td><b>wind_ms</b></td><td>m/s</td><td>wind speed in meters per second</td></tr>\n"
 #endif
-#ifdef BME280_SENSOR
+#ifdef TEMP_SENSOR
 "      <tr><td><b>temp_c</b></td><td>°C</td><td>temperature in Celsius</td></tr>\n"
+#endif
+#ifdef HUMID_SENSOR
 "      <tr><td><b>hum_rh</b></td><td>%</td><td>relative humidity percentage</td></tr>\n"
+#endif
+#ifdef PRESS_SENSOR
 "      <tr><td><b>press_hpa</b></td><td>hPa</td><td>atmospheric pressure in hectopascals</td></tr>\n"
 #endif
 #ifdef AIR_QUAL_SENSOR
@@ -112,9 +120,13 @@ static const char API_HELP_HTML[] PROGMEM =
 "      \"wind_speed_max\": 2.1,\n"
 "      \"wind_speed_samples\": 12,\n"
 #endif
-#ifdef BME280_SENSOR
+#ifdef TEMP_SENSOR
 "      \"temperature\": 22.9,\n"
+#endif
+#ifdef HUMID_SENSOR
 "      \"humidity\": 56.0,\n"
+#endif
+#ifdef PRESS_SENSOR
 "      \"pressure\": 1012.1,\n"
 #endif
 #ifdef AIR_QUAL_SENSOR
@@ -131,9 +143,13 @@ static const char API_HELP_HTML[] PROGMEM =
 "      <tr><td><b>wind_speed_avg</b></td><td>m/s</td><td>average wind speed over 1min bucket</td></tr>\n"
 "      <tr><td><b>wind_speed_max</b></td><td>m/s</td><td>maximum wind speed in 1min bucket</td></tr>\n"
 #endif
-#ifdef BME280_SENSOR
+#ifdef TEMP_SENSOR
 "      <tr><td><b>temperature</b></td><td>°C</td><td>temperature in Celsius</td></tr>\n"
+#endif
+#ifdef HUMID_SENSOR
 "      <tr><td><b>humidity</b></td><td>%</td><td>relative humidity percentage</td></tr>\n"
+#endif
+#ifdef PRESS_SENSOR
 "      <tr><td><b>pressure</b></td><td>hPa</td><td>atmospheric pressure in hectopascals</td></tr>\n"
 #endif
 #ifdef AIR_QUAL_SENSOR
@@ -156,8 +172,17 @@ static const char API_HELP_HTML[] PROGMEM =
 #ifdef WIND_SENSOR
       ", 0.8, 2.1"
 #endif
-#ifdef BME280_SENSOR
-      ", 12, 22.9, 56.0, 1012.1"
+#ifdef TEMP_SENSOR
+      ", 12"
+#endif
+#ifdef HUMID_SENSOR
+      ", 22.9"
+#endif
+#ifdef HUMID_SENSOR
+      ", 56.0"
+#endif
+#ifdef PRESS_SENSOR
+      ", 1012.1"
 #endif
 #ifdef AIR_QUAL_SENSOR
       ", 5.2, 12.8, 18.4"
@@ -172,9 +197,13 @@ static const char API_HELP_HTML[] PROGMEM =
 "      <tr><td><b>[2]</b></td><td>m/s</td><td>maximum wind speed in 1min bucket</td></tr>\n"
 "      <tr><td><b>[3]</b></td><td>samples</td><td>number of wind samples in bucket</td></tr>\n"
 #endif
-#ifdef BME280_SENSOR
+#ifdef TEMP_SENSOR
 "      <tr><td><b>[4]</b></td><td>°C</td><td>temperature in Celsius</td></tr>\n"
+#endif
+#ifdef HUMID_SENSOR
 "      <tr><td><b>[5]</b></td><td>%</td><td>relative humidity percentage</td></tr>\n"
+#endif
+#ifdef PRESS_SENSOR
 "      <tr><td><b>[6]</b></td><td>hPa</td><td>atmospheric pressure in hectopascals</td></tr>\n"
 #endif
 #ifdef AIR_QUAL_SENSOR
@@ -197,13 +226,17 @@ static const char API_HELP_HTML[] PROGMEM =
 "      \"avgWind\": 1.2,\n"
 "      \"maxWind\": 5.8,\n"
 #endif
-#ifdef BME280_SENSOR
+#ifdef TEMP_SENSOR
 "      \"avgTemp\": 24.1,\n"
 "      \"minTemp\": 19.5,\n"
 "      \"maxTemp\": 28.0,\n"
+#endif
+#ifdef HUMID_SENSOR
 "      \"avgHum\": 58.2,\n"
 "      \"minHum\": 44.0,\n"
 "      \"maxHum\": 71.5,\n"
+#endif
+#ifdef PRESS_SENSOR
 "      \"avgPress\": 1012.5,\n"
 "      \"minPress\": 1008.2,\n"
 "      \"maxPress\": 1016.8,\n"
@@ -224,13 +257,17 @@ static const char API_HELP_HTML[] PROGMEM =
 "      <tr><td><b>avgWind</b></td><td>m/s</td><td>average wind speed for the day</td></tr>\n"
 "      <tr><td><b>maxWind</b></td><td>m/s</td><td>maximum wind speed for the day</td></tr>\n"
 #endif
-#ifdef BME280_SENSOR
+#ifdef TEMP_SENSOR
 "      <tr><td><b>avgTemp</b></td><td>°C</td><td>average temperature for the day</td></tr>\n"
 "      <tr><td><b>minTemp</b></td><td>°C</td><td>minimum temperature for the day</td></tr>\n"
 "      <tr><td><b>maxTemp</b></td><td>°C</td><td>maximum temperature for the day</td></tr>\n"
+#endif
+#ifdef HUMID_SENSOR
 "      <tr><td><b>avgHum</b></td><td>%</td><td>average relative humidity for the day</td></tr>\n"
 "      <tr><td><b>minHum</b></td><td>%</td><td>minimum relative humidity for the day</td></tr>\n"
 "      <tr><td><b>maxHum</b></td><td>%</td><td>maximum relative humidity for the day</td></tr>\n"
+#endif
+#ifdef PRESS_SENSOR
 "      <tr><td><b>avgPress</b></td><td>hPa</td><td>average atmospheric pressure for the day</td></tr>\n"
 "      <tr><td><b>minPress</b></td><td>hPa</td><td>minimum atmospheric pressure for the day</td></tr>\n"
 "      <tr><td><b>maxPress</b></td><td>hPa</td><td>maximum atmospheric pressure for the day</td></tr>\n"

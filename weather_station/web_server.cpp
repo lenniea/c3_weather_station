@@ -7,7 +7,6 @@
 #include "config.h"
 #include "web_server.h"
 #include "api_help_page.h"
-#include "upload_page.h"
 
 extern bool gSdOk;
 
@@ -16,16 +15,22 @@ WebServer server(80);
 
 // ------------------- WEB UI + API -------------------
 
-void handleRoot() {
-  if (gSdOk && LittleFS.exists("/web/index.html")) {
-    File f = LittleFS.open("/web/index.html", FILE_READ);
+bool streamHTMLFile(const char* filepath) {
+  if (gSdOk && LittleFS.exists(filepath)) {
+    File f = LittleFS.open(filepath, FILE_READ);
     if (f) {
       server.streamFile(f, "text/html");
       f.close();
-      return;
+      return true;
     }
+    return false;
   }
 
+}
+void handleRoot() {
+  if (streamHTMLFile("/web/index.html")) {
+    return;
+  }
   const char* fallbackHtml = R"HTML(
 <!DOCTYPE html>
 <html>
@@ -130,7 +135,9 @@ void handleApiUiFiles() {
 }
 
 void handleUploadPage() {
-  server.send_P(200, "text/html", UPLOAD_HTML);
+  if (!streamHTMLFile("/web/upload.html")) {
+    server.send(400, "missing file");
+  }
 }
 
 bool initWebServer(void)
