@@ -20,47 +20,6 @@ namespace UIConfig {
 bool gEnvOk = false;
 bool gSdOk = false;
 
-#ifdef WIND_SENSOR
-float    gBucketWindSum = 0.0f;
-float    gBucketWindMax1 = 0.0f; // highest observed in bucket
-float    gBucketWindMax2 = 0.0f; // second-highest observed in bucket
-uint32_t gBucketSamples = 0;
-uint32_t gBucketPulseCount = 0;
-uint32_t gBucketPulseElapsedMs = 0;
-
-uint32_t gTodayBucketCount = 0;
-float    gTodayMax = 0.0f;
-uint32_t gLastPpsMillis = 0;
-float    gTodaySumOfBucketAvgs = 0.0f;
-
-#endif
-
-#ifdef TEMP_SENSOR
-float gTempC = NAN;
-float gBucketTempSum = 0.0f;
-float gTodayTempSum = 0.0f;
-uint32_t gTodayTempCount = 0;
-float gTodayTempMin = NAN;
-float gTodayTempMax = NAN;
-#endif
-#ifdef HUMID_SENSOR
-float gHumRH = NAN;
-float gBucketHumSum = 0.0f;
-float gTodayHumSum = 0.0f;
-uint32_t gTodayHumCount = 0;
-float gTodayHumMin = NAN;
-float gTodayHumMax = NAN;
-#endif
-#ifdef PRESS_SENSOR
-float gPressurePa = NAN;
-float gBucketPressSumPa = 0.0f;
-float gTodayPressSum = 0.0f;
-uint32_t gTodayPressCount = 0;
-float gTodayPressMin = NAN;
-float gTodayPressMax = NAN;
-#endif
-uint32_t gBucketEnvSamples = 0;
-
 // Plot definitions
 static const PlotConfig PLOTS[] = {
 #ifdef WIND_SENSOR

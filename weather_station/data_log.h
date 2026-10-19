@@ -98,49 +98,6 @@ struct DaySummary {
 extern bool gEnvOk;
 extern bool gSdOk;
 
-#ifdef WIND_SENSOR
-extern float    gBucketWindSum;
-extern float    gBucketWindMax1; // highest observed in bucket
-extern float    gBucketWindMax2; // second-highest observed in bucket
-extern uint32_t gBucketSamples;
-extern uint32_t gBucketPulseCount;
-extern uint32_t gBucketPulseElapsedMs;
-
-extern uint32_t gTodayBucketCount;
-extern float    gTodayMax;
-
-extern uint32_t gLastPpsMillis;
-extern float    gTodaySumOfBucketAvgs;
-
-#endif
-
-#ifdef TEMP_SENSOR
-extern float gTempC;
-extern float gBucketTempSum;
-extern float gTodayTempSum;
-extern uint32_t gTodayTempCount;
-extern float gTodayTempMin;
-extern float gTodayTempMax;
-
-#endif
-#ifdef HUMID_SENSOR
-extern float gHumRH;
-extern float    gBucketHumSum;
-
-extern float    gTodayHumSum;
-extern uint32_t gTodayHumCount;
-extern float    gTodayHumMin;
-extern float    gTodayHumMax;
-
-#endif
-#ifdef PRESS_SENSOR
-extern float gPressurePa;
-extern float gBucketPressSumPa;
-extern float    gTodayPressSum;
-extern uint32_t gTodayPressCount;
-extern float    gTodayPressMin;
-extern float    gTodayPressMax;
-#endif
 extern uint32_t gBucketEnvSamples;
 
 extern BucketSample gBuckets[];

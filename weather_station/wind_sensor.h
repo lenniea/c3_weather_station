@@ -3,10 +3,27 @@
 
 #include <stdint.h>
 
+#ifdef WIND_SENSOR
+
+extern float    gBucketWindSum;
+extern float    gBucketWindMax1; // highest observed in bucket
+extern float    gBucketWindMax2; // second-highest observed in bucket
+extern uint32_t gBucketSamples;
+extern uint32_t gBucketPulseCount;
+extern uint32_t gBucketPulseElapsedMs;
+
+extern uint32_t gTodayBucketCount;
+extern float    gTodayMax;
+
+extern uint32_t gLastPpsMillis;
+extern float    gTodaySumOfBucketAvgs;
+
 // wind pulses
 extern volatile uint32_t gPulseCount;
 extern volatile uint32_t gLastPulseMicros;
 extern float gNowWindMS;
+
+#endif
 
 void clearWindToday(void);
 void clearWindSamples(void);
