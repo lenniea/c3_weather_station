@@ -9,7 +9,20 @@ float gTodayTempSum = 0.0f;
 uint32_t gTodayTempCount = 0;
 float gTodayTempMin = NAN;
 float gTodayTempMax = NAN;
+
+String getEnvTemp(int fmt) {
+  float degC = gTempC;
+  if (fmt == 0) {
+    return String(degC);
+  }
+  if (fmt > 0) {
+    return String(degC, fmt);
+  }
+  float degF = (degC * 9.0f/5.0f) + 32.0f;
+  return String(degF, -fmt);
+}
 #endif
+
 #ifdef HUMID_SENSOR
 float gHumRH = NAN;
 float gBucketHumSum = 0.0f;
@@ -17,7 +30,12 @@ float gTodayHumSum = 0.0f;
 uint32_t gTodayHumCount = 0;
 float gTodayHumMin = NAN;
 float gTodayHumMax = NAN;
+
+String getEnvHumidity(int places) {
+  return String(gHumRH, places);
+}
 #endif
+
 #ifdef PRESS_SENSOR
 float gPressurePa = NAN;
 float gBucketPressSumPa = 0.0f;
@@ -25,6 +43,10 @@ float gTodayPressSum = 0.0f;
 uint32_t gTodayPressCount = 0;
 float gTodayPressMin = NAN;
 float gTodayPressMax = NAN;
+
+String getEnvPressure(int places) {
+  return String(gPressurePa, places);
+}
 #endif
 
 uint32_t gBucketEnvSamples = 0;
@@ -220,12 +242,14 @@ void pollEnv(void)
   ++gBucketEnvSamples;
 }
 
-void pollEnvIfNeeded(uint32_t msNow)
+bool pollEnvIfNeeded(uint32_t msNow)
 {
   if (msNow - gLastEnvPoll >= POLL_INTERVAL_MS) {
     pollEnv();
     gLastEnvPoll += POLL_INTERVAL_MS;
+    return true;
   }
+  return false;
 }
 
 bool initEnvSensors(uint32_t msNow)
