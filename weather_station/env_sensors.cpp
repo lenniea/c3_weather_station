@@ -278,7 +278,7 @@ bool initEnvSensors(uint32_t msNow)
   }
   return gBmeOk;
 #elif defined(BMP280_SENSOR)
-  gBmpOk = bmp.begin(BMP280_SENSOR);
+  gBmpOk = bmp.begin(BMP280_ADDRESS);
   if (!gBmpOk) {
     Serial.println("ERROR init BMP280 SENSOR");
   }

@@ -5,6 +5,8 @@
 
 #ifdef WIND_SENSOR
 
+#define TMAG5273_I2C_ADDR   0x35
+
 extern float    gBucketWindSum;
 extern float    gBucketWindMax1; // highest observed in bucket
 extern float    gBucketWindMax2; // second-highest observed in bucket
@@ -34,5 +36,7 @@ float computeMaxWind(float avgWindMs);
 void updateWindPPS(uint32_t msNow);
 void setupWindPin(void);
 void initWindSensor(void);
+bool initWindVane(uint8_t i2cAddr = TMAG5273_I2C_ADDR);
+uint16_t getWindAngle(void);
 
 #endif
