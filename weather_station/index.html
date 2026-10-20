@@ -1,0 +1,459 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Weather Station</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='40' r='18' fill='%23FFB000'/><circle cx='50' cy='40' r='12' fill='%23FFC933'/><path d='M50 10v8M50 62v8M78 40h8M14 40h8M71 19l6-6M23 61l6-6M71 61l6 6M23 19l6 6' stroke='%23FFB000' stroke-width='3' stroke-linecap='round'/><ellipse cx='30' cy='64' rx='16' ry='10' fill='%23E0E0E0'/><ellipse cx='50' cy='60' rx='22' ry='14' fill='%23F0F0F0'/><ellipse cx='70' cy='64' rx='16' ry='10' fill='%23E8E8E8'/></svg>"/>
+  <style>
+:root {
+  --bg-color: #fff;
+  --text-color: #000;
+  --card-border: #ddd;
+  --card-bg: #fff;
+  --muted-color: #666;
+  --svg-bg: #efefef;
+  --border-light: #eee;
+  --pill-bg: #f2f2f2;
+  --code-bg: #f6f6f6;
+  --button-bg: #fff;
+  --button-border: #ddd;
+  --axis-text: #555;
+  --axis-line: #ccc;
+  --gradient-edge: #fff;
+  --sticky-bg: #fff;
+  --divider-bg: #eee;
+  --table-border-strong: #000;
+  --wind-line-color: #000;
+  --table-cell-bg: #eee;
+  --midnight-line: #bbb;
+}
+
+body.dark-mode {
+  --bg-color: #1a1a1a;
+  --text-color: #e0e0e0;
+  --card-border: #404040;
+  --card-bg: #2a2a2a;
+  --muted-color: #999;
+  --svg-bg: #333;
+  --border-light: #333;
+  --pill-bg: #3a3a3a;
+  --code-bg: #333;
+  --button-bg: #2a2a2a;
+  --button-border: #404040;
+  --axis-text: #999;
+  --axis-line: #444;
+  --gradient-edge: #2a2a2a;
+  --sticky-bg: #2a2a2a;
+  --divider-bg: #404040;
+  --table-border-strong: #666;
+  --wind-line-color: #ccc;
+  --table-cell-bg: #353535;
+  --midnight-line: #666;
+}
+
+body {
+  font-family: system-ui, sans-serif;
+  margin: 16px;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  transition: background-color 0.3s, color 0.3s;
+}
+
+.row,.files,.btnrow,.flex-between {
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.flex-between { justify-content:space-between; align-items:center; }
+
+.card {
+  border:1px solid var(--card-border);
+  border-radius:12px;
+  padding:12px;
+  min-width:260px;
+  background-color: var(--card-bg);
+}
+.card-full { flex:1; min-width:320px; }
+
+.big { font-size:42px; font-weight:700; }
+.small { font-size:12px; }
+.muted { color:var(--muted-color); }
+
+svg {
+  width:100%;
+  height:140px;
+  border-radius:10px;
+  background:var(--svg-bg);
+}
+
+table { width:100%; border-collapse:collapse; }
+td,th {
+  border-bottom:1px solid var(--border-light);
+  padding:6px 4px;
+  font-size:14px;
+  text-align:left;
+}
+
+.table-wrapper { position:relative; }
+.table-scroll {
+  overflow-x:auto;
+  padding-right:20px;
+}
+.table-scroll table { min-width:1000px; }
+
+.table-wrapper::after {
+  content:'';
+  position:absolute;
+  inset:0 0 0 auto;
+  width:40px;
+  background:linear-gradient(to right,transparent,var(--gradient-edge));
+  pointer-events:none;
+  z-index:4;
+}
+
+.table-scroll tbody tr > :first-child,
+.table-scroll thead tr:first-child > th:first-child {
+  position:sticky;
+  left:0;
+  background:var(--sticky-bg);
+  z-index:2;
+}
+.table-scroll thead tr:first-child > th:first-child { z-index:3; }
+
+tbody tr :is(th,td):first-child::after,
+thead tr:first-child th:first-child::after {
+  content:'';
+  position:absolute;
+  inset:0 0 0 auto;
+  width:2px;
+  background:var(--table-border-strong);
+}
+
+.pill {
+  display:inline-block;
+  padding:2px 8px;
+  margin:6px 6px 0 0;
+  border-radius:999px;
+  background:var(--pill-bg);
+}
+
+a { color:inherit; }
+
+.filecol { flex:1; min-width:320px; }
+
+button,input {
+  border:1px solid var(--button-border);
+  border-radius:10px;
+  background:var(--button-bg);
+  color:var(--text-color);
+}
+button {
+  padding:8px 10px;
+  cursor:pointer;
+}
+button:disabled {
+  opacity:.4;
+  cursor:not-allowed;
+}
+.btnrow button.small {
+  padding:4px 8px;
+  font-size:12px;
+}
+
+input { padding:7px 10px; width:80px; }
+
+code {
+  background:var(--code-bg);
+  padding:2px 6px;
+  border-radius:8px;
+}
+
+:is(.xaxis,.yaxis) text {
+  font-size:10px;
+  fill:var(--axis-text);
+}
+:is(.xaxis,.yaxis) line {
+  stroke:var(--axis-line);
+}
+
+.tooltip {
+  position:fixed;
+  padding:6px 8px;
+  border-radius:8px;
+  background:rgba(0,0,0,.8);
+  color:#fff;
+  font-size:12px;
+  pointer-events:none;
+  z-index:1000;
+}
+
+.plots-grid {
+  display:grid;
+  gap:12px;
+  width:100%;
+  overflow-x:auto;
+  box-sizing:border-box;
+  grid-template-columns:repeat(1,minmax(330px,1fr));
+}
+@media (min-width:825px) {
+  .plots-grid { grid-template-columns:repeat(2,minmax(330px,1fr)); }
+}
+@media (min-width:1600px) {
+  .plots-grid { grid-template-columns:repeat(4,minmax(330px,1fr)); }
+}
+@media (pointer: coarse) {
+  .plots-grid { row-gap:50px; }
+}
+
+.divider {
+  width:1px;
+  background:var(--divider-bg);
+  align-self:stretch;
+}
+
+.reset-btn {
+  visibility:hidden;
+  padding:2px 6px;
+  font-size:11px;
+}
+
+.zoom-btns {
+  display:flex;
+  gap:4px;
+  flex-wrap:wrap;
+}
+
+.zoom-btn {
+  padding:2px 6px;
+  font-size:11px;
+}
+
+.zoom-btn.active {
+  background:#333;
+  color:#fff;
+  border-color:#333;
+}
+
+body.dark-mode .zoom-btn.active {
+  background:#fff;
+  color:#000;
+  border-color:#fff;
+}
+
+.sensor-item { flex:1; min-width:120px; }
+
+.table-alt-bg {
+  background-color: var(--table-cell-bg);
+}
+
+#theme-toggle {
+  padding:8px 12px;
+  font-size:16px;
+  cursor:pointer;
+  border-radius:10px;
+  border:1px solid var(--button-border);
+  background:var(--button-bg);
+  transition: transform 0.2s;
+}
+#theme-toggle:hover {
+  transform: scale(1.05);
+}
+
+  </style>
+</head>
+<body>
+  <div class="flex-between" style="align-items:flex-start; gap:12px; flex-wrap:nowrap; margin-bottom:12px;">
+    <div style="flex:1;">
+      <h2>Weather Station</h2>
+      <div class="muted small">Local time: <span id="tlocal">--</span></div>
+    </div>
+    <button id="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" style="flex-shrink:0;">☾</button>
+  </div>
+
+  <div class="row">
+    <div class="card card-full">
+      <div class="muted">Current Measurement</div>
+      <div class="row" style="gap:16px; align-items:center;">
+#ifdef WIND_SENSOR
+        <div class="sensor-item">
+          <div class="muted small" style="font-weight:700;">Wind (km/h)</div>
+          <div class="big" id="now">--.-</div>
+        </div>
+#endif
+#ifdef TEMP_SENSOR
+        <div class="divider"></div>
+        <div class="sensor-item">
+          <div class="muted small" style="font-weight:700;">Temp (&deg;C)</div>
+          <div class="big" id="temp">--.-</div>
+        </div>
+#endif
+#ifdef HUMID_SENSOR
+        <div class="divider"></div>
+        <div class="sensor-item">
+          <div class="muted small" style="font-weight:700;">RH (%)</div>
+          <div class="big" id="rh">--.-</div>
+        </div>
+#endif
+#ifdef PRESS_SENSOR
+        <div class="divider"></div>
+        <div style="flex:1; min-width:140px;">
+          <div class="muted small" style="font-weight:700;">Pressure (hPa)</div>
+          <div class="big" id="pres">----.-</div>
+        </div>
+      </div>
+#endif
+      <div class="row" style="margin-top:10px; gap:10px; flex-wrap:wrap;">
+        <span class="pill" style="font-weight:700;">Uptime: <span id="uptime">--</span></span>
+        <span class="pill" style="font-weight:700;">PPS: <span id="pps">--</span></span>
+        <span class="pill" style="font-weight:700;">Bucket: <span id="bucket_sec">--</span>s</span>
+        <span class="pill" id="bmeok_pill" style="font-weight:700;">BME280: <span id="bmeok">--</span></span>
+#ifdef AIR_QUAL_SENSOR
+        <span class="pill" id="pmsok_pill" style="font-weight:700;">Particle Sensor: <span id="pmsok">--</span></span>
+#endif
+        <span class="pill" id="sdok_pill" style="font-weight:700;">SD Card: <span id="sdok">--</span></span>
+        <span class="pill" id="wifi_pill" style="font-weight:700;">WiFi: <span id="wifi">--</span> dBm (<span id="wifi_quality">--</span>)</span>
+        <span class="pill" id="ram_pill" style="font-weight:700;">RAM: <span id="ram">--</span></span>
+        <span class="pill" id="cpu_temp_pill" style="font-weight:700;">CPU Temp: <span id="cpu_temp">--</span>°C</span>
+#ifdef AIR_QUAL_SENSOR
+        <span class="pill" id="aqi_pm25_pill" style="font-weight:700;">PM2.5 AQI: <span id="aqi_pm25">--</span> - <span id="aqi_pm25_cat">--</span></span>
+        <span class="pill" id="aqi_pm10_pill" style="font-weight:700;">PM10 AQI: <span id="aqi_pm10">--</span> - <span id="aqi_pm10_cat">--</span></span>
+#endif
+      </div>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top: 14px;">
+    <div class="card card-full">
+      <div class="flex-between" style="margin-bottom: 8px;">
+        <div class="muted">Historical Data</div>
+        <div style="text-align:right;">
+          <div class="zoom-btns">
+            <button class="small zoom-btn" data-zoom="24" onclick="setZoomLevel(24)">Max (24hr)</button>
+            <button class="small zoom-btn" data-zoom="12" onclick="setZoomLevel(12)">12hr</button>
+            <button class="small zoom-btn" data-zoom="6" onclick="setZoomLevel(6)">6hr</button>
+            <button class="small zoom-btn" data-zoom="3" onclick="setZoomLevel(3)">3hr</button>
+            <button class="small zoom-btn" data-zoom="1" onclick="setZoomLevel(1)">1hr</button>
+          </div>
+          <button class="small reset-btn" onclick="resetZoom()" id="reset_zoom_btn">Reset</button>
+        </div>
+      </div>
+      <div id="plots_container" class="plots-grid">
+        <!-- Plots will be dynamically generated by JavaScript -->
+      </div>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top: 14px;">
+    <div class="card card-full">
+      <div class="muted">Daily summaries</div>
+      <div class="table-wrapper">
+        <div class="table-scroll">
+          <table>
+          <thead id="table_header">
+            <!-- Table headers will be dynamically generated by JavaScript -->
+          </thead>
+          <tbody id="days"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top: 14px;">
+    <div class="card card-full">
+      <div class="muted">Download data</div>
+
+      <div class="btnrow">
+        <input id="zipdays" type="number" min="1" value="7"/>
+        <button onclick="downloadZip()">Download last N days as .ZIP</button>
+      </div>
+
+      <div class="files">
+        <div class="filecol">
+          <div class="flex-between" style="margin-bottom:4px;">
+            <div class="muted">Daily files (/data)</div>
+            <div id="files_data_nav" style="display:none; align-items:center; gap:8px;">
+              <button class="small" onclick="navigateFiles('data', -1)" id="files_data_prev" style="padding:4px 8px;">←</button>
+              <span class="muted small" id="files_data_info"></span>
+              <button class="small" onclick="navigateFiles('data', 1)" id="files_data_next" style="padding:4px 8px;">→</button>
+              <select id="files_data_page" onchange="goToPage('data', this.value)" style="padding:2px 4px; border-radius:6px; border:1px solid #ddd; font-size:12px;"></select>
+            </div>
+          </div>
+          <div id="files_data" class="small"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="row" style="margin-top: 10px;">
+    <div class="card card-full">
+      <div class="btnrow flex-between">
+        <button onclick="window.location='/api_help'">API reference</button>
+        <div style="display:flex; gap:8px;">
+          <button onclick="window.location='/upload'">Upload UI files</button>
+          <button style="background:#fee; border-color:#f5a3a3; color:#a00" onclick="clearSdData()">Clear SD data</button>
+          <button style="background:#eef; border-color:#a3b5f5; color:#003399" onclick="rebootDevice()">Reboot</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// Cookie helper functions
+function setCookie(name, value, days) {
+  const d = new Date();
+  d.setTime(d.getTime() + (days * 24 * 60 * 60 * 1000));
+  document.cookie = name + "=" + value + ";expires=" + d.toUTCString() + ";path=/";
+}
+
+function getCookie(name) {
+  const nameEQ = name + "=";
+  const ca = document.cookie.split(';');
+  for (let i = 0; i < ca.length; i++) {
+    let c = ca[i];
+    while (c.charAt(0) === ' ') c = c.substring(1);
+    if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length);
+  }
+  return null;
+}
+
+// Dark mode functionality
+function toggleTheme() {
+  const body = document.body;
+  const themeToggle = document.getElementById('theme-toggle');
+
+  if (body.classList.contains('dark-mode')) {
+    body.classList.remove('dark-mode');
+    themeToggle.textContent = '☾';
+    themeToggle.title = 'Switch to dark mode';
+    setCookie('theme', 'light', 365);
+  } else {
+    body.classList.add('dark-mode');
+    themeToggle.textContent = '☼';
+    themeToggle.title = 'Switch to light mode';
+    setCookie('theme', 'dark', 365);
+  }
+}
+
+// Load saved theme on page load
+(function() {
+  const savedTheme = getCookie('theme');
+  const themeToggle = document.getElementById('theme-toggle');
+
+  if (savedTheme === 'dark') {
+    document.body.classList.add('dark-mode');
+    themeToggle.textContent = '☼';
+    themeToggle.title = 'Switch to light mode';
+  } else {
+    themeToggle.textContent = '☾';
+    themeToggle.title = 'Switch to dark mode';
+  }
+})();
+</script>
+
+<script src="/root.js"></script>
+
+</body>
+</html>

@@ -6,7 +6,6 @@
 #include <LittleFS.h>
 #include "config.h"
 #include "web_server.h"
-#include "api_help_page.h"
 
 extern bool gSdOk;
 
@@ -65,7 +64,9 @@ void handleRoot() {
 }
 
 void handleApiHelp() {
-  server.send_P(200, "text/html", API_HELP_HTML);
+  if (!streamHTMLFile("/web/api_help.html")) {
+    server.send(404, "missing file");
+  }
 }
 
 void handleRootJs() {
@@ -136,7 +137,7 @@ void handleApiUiFiles() {
 
 void handleUploadPage() {
   if (!streamHTMLFile("/web/upload.html")) {
-    server.send(400, "missing file");
+    server.send(404, "missing file");
   }
 }
 

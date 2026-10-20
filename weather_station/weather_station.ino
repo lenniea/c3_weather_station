@@ -607,29 +607,9 @@ static String buildBucketJson(const BucketSample& b) {
   float press_hpa = (b.avgPressHpa != -128) ? (1000.0f + (float)b.avgPressHpa) : NAN;
 #endif
 
-  // Skip buckets with no valid sensor data
-  if (
-#ifdef WIND_SENSOR
-      !isfinite(avg_wind) && !isfinite(max_wind)
-#else
-      true
-#endif
-#ifdef TEMP_SENSOR
-      && !isfinite(temp_c)
-#endif
-#ifdef HUMID_SENSOR
-      && !isfinite(hum_rh)
-#endif
-#ifdef PRESS_SENSOR
-      && !isfinite(press_hpa)
-#endif
-    ) {
-    return "";
-  }
-
   String out = "{\"timestamp\":";
   out += String((uint32_t)b.startEpoch);
-#ifdef WINO_SENSOR
+#ifdef WIND_SENSOR
   out += ",\"wind_speed_avg\":";
   out += numOrNull(avg_wind, 3);
   out += ",\"wind_speed_max\":";
@@ -680,23 +660,6 @@ static String buildBucketJsonCompact(const BucketSample& b) {
 #ifdef PRESS_SENSOR
   float press_hpa = b.avgPressHpa;
 #endif
-  // Skip buckets with no valid sensor data
-  if (true
-#ifdef WIND_SENSOR
-      && !isfinite(avg_wind) && !isfinite(max_wind)
-#endif
-#ifdef TEMP_SENSOR
-      && !isfinite(temp_c)
-#endif
-#ifdef HUMID_SENSOR
-      && !isfinite(hum_rh)
-#endif
-#ifdef PRESS_SENSOR
-      && !isfinite(press_hpa)
-#endif
-    ) {
-    return "";
-  }
 
   String out = "[";
   out += String((uint32_t)b.startEpoch);
