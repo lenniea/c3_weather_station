@@ -109,6 +109,8 @@ static const TableColumn TABLE_COLUMNS[] = {
 #ifdef WIND_SENSOR
   {"avgWind", "avg", "km/h", 3.6f, 1, "#f8f8f8", "Wind Speed"},
   {"maxWind", "max", "km/h", 3.6f, 1, "#f8f8f8", "Wind Speed"},
+  {"windDir", "avg", "°",  1.0f, 1, "#f8f8f8", "Wind Direction"},
+  {"avgDir", "avg", "°", 1.0f, 1, "", "Wind Direction"},
 #endif
 #ifdef TEMP_SENSOR
   {"avgTemp", "avg", "°C", 1.0f, 1, "", "Temperature"},
@@ -203,19 +205,26 @@ bool ensureDir(const char* path) {
   return LittleFS.mkdir(path);
 }
 
-bool appendLine(const String& path, const String& line, const String& headerIfNew = "") {
+void reportLittleFS(void) {
+  Serial.print("LittleFS: ");
+  Serial.print(LittleFS.usedBytes());
+  Serial.print(" of ");
+  Serial.println(LittleFS.totalBytes());
+}
+
+bool appendLine(const char* path, const char* line, const char* headerIfNew) {
   if (!gSdOk) return false;
 
-  bool exists = LittleFS.exists(path.c_str());
-  File f = LittleFS.open(path.c_str(), FILE_APPEND);
+  bool exists = LittleFS.exists(path);
+  File f = LittleFS.open(path, FILE_APPEND);
   if (!f) return false;
 
-  if (!exists && headerIfNew.length()) {
-    f.print(headerIfNew);
-    if (headerIfNew[headerIfNew.length()-1] != '\n') f.print("\n");
+  if (!exists) {
+    Serial.println(headerIfNew);
+    f.println(headerIfNew);
   }
-  f.print(line);
-  if (line.length() && line[line.length()-1] != '\n') f.print("\n");
+  Serial.println(line);
+  f.println(line);
   f.close();
   return true;
 }
@@ -223,6 +232,7 @@ bool appendLine(const String& path, const String& line, const String& headerIfNe
 String buildApiNow(void) {
 #ifdef WIND_SENSOR
   float pps = calcWindPps();
+  uint16_t wind_dir = computeWindDir();
 #endif
   time_t nowE = epochNow();
 #ifdef PRESS_SENSOR
@@ -235,6 +245,7 @@ String buildApiNow(void) {
 #ifdef WIND_SENSOR
   out += "\"wind_pps\":" + (isfinite(pps) ? String(pps, 3) : String("null")) + ",";
   out += "\"wind_ms\":" + (isfinite(gNowWindMS) ? String(gNowWindMS, 3) : String("null")) + ",";
+  out += "\"wind_dir\":" + String(wind_dir) + ",";
 #endif
 #if defined(BME280_SENSOR) || defined(BMP280_SENSOR)
   out += "\"bme280_ok\":" + String(gEnvOk ? "true" : "false") + ",";
@@ -344,7 +355,7 @@ void logBucketToSD(const BucketSample& b) {
   String header =
     "datetime,epoch"
 #ifdef WIND_SENSOR
-    ",wind_avg_ms,wind_max_ms"
+    ",wind_avg_ms,wind_max_ms,wind_dir"
 #endif
 #ifdef TEMP_SENSOR
     ",temp_c"
@@ -362,29 +373,31 @@ void logBucketToSD(const BucketSample& b) {
 
   String line =
     fmtLocal(b.startEpoch) + "," +
-    String((uint32_t)b.startEpoch) + "," +
+    String((uint32_t)b.startEpoch)
 #ifdef WIND_SENSOR
-    String(b.avgWind, 3) + "," +
-    String(b.maxWind, 3) + "," +
+    + "," + String(b.avgWind, 3)
+    + "," + String(b.maxWind, 3)
+    + "," + String(b.windDir)
 #endif
 #ifdef TEMP_SENSOR
-    String(b.avgTempC, 2) + "," +
+    + "," + String(b.avgTempC, 2)
 #endif
 #ifdef HUMID_SENSOR
-    String(b.avgHumRH, 2) + "," +
+    + "," + String(b.avgHumRH, 2)
 #endif
 #ifdef PRESS_SENSOR
-    String(b.avgPressHpa, 2) + "," +
+    + "," + String(b.avgPressHpa, 2)
 #endif
 #ifdef AIR_QUAL_SENSOR
-    String(isfinite(b.avgPM1) ? String(b.avgPM1, 1) : String("")) + "," +
-    String(isfinite(b.avgPM25) ? String(b.avgPM25, 1) : String("")) + "," +
-    String(isfinite(b.avgPM10) ? String(b.avgPM10, 1) : String("")) + "," +
-    String(b.samples);
+    + "," + String(isfinite(b.avgPM1) ? String(b.avgPM1, 1) : String(""))
+    + "," + String(isfinite(b.avgPM25) ? String(b.avgPM25, 1) : String(""))
+    + "," + String(isfinite(b.avgPM10) ? String(b.avgPM10, 1) : String(""))
+    + "," + String(b.samples)
 #endif
+  ;
 
-  appendLine(dailyFile, line, header);
-  appendLine(backupFile, line, header);
+  appendLine(dailyFile.c_str(), line.c_str(), header.c_str());
+//  appendLine(backupFile, line, header);
 }
 
 static float parseFloatOrNan(const String& s) {
@@ -484,6 +497,7 @@ void loadRecentBucketsFromSD(time_t nowEpoch) {
 #ifdef WIND_SENSOR
       b.avgWind = parseFloatOrNan(parts[col++]);
       b.maxWind = parseFloatOrNan(parts[col++]);
+//      b.windDir = parseFloatOrNan(parts[col++]);
 #endif
 #ifdef TEMP_SENSOR
       b.avgTempC = parseFloatOrNan(parts[col++]);
@@ -572,7 +586,7 @@ void deleteOldDailyFileIfNeeded(time_t todayMidnightLocal) {
 
 void pushDaySummary(time_t dayStart
 #ifdef WIND_SENSOR
-                   , float avgWind, float maxWind
+                   , float avgWind, float maxWind, uint16_t windDir
 #endif
 #ifdef TEMP_SENSOR
                    , float avgTemp, float minTemp, float maxTemp
@@ -593,6 +607,7 @@ void pushDaySummary(time_t dayStart
 #ifdef WIND_SENSOR
   d.avgWind = avgWind;
   d.maxWind = maxWind;
+  d.windDir = windDir;
 #endif
 #ifdef TEMP_SENSOR
   d.avgTemp = avgTemp;
@@ -633,6 +648,7 @@ void maybeRolloverDay(time_t nowEpoch) {
   if (midnight != gTodayMidnightEpoch) {
 #ifdef WIND_SENSOR
       float avgWind = gTodayBucketCount ? (gTodaySumOfBucketAvgs / (float)gTodayBucketCount) : NAN;
+      uint16_t windDir = computeWindDir();
 #endif
 #ifdef TEMP_SENSOR
       float avgTemp = (gTodayTempCount > 0) ? (gTodayTempSum / (float)gTodayTempCount) : NAN;
@@ -650,7 +666,7 @@ void maybeRolloverDay(time_t nowEpoch) {
 #endif
       pushDaySummary(gTodayMidnightEpoch
 #ifdef WIND_SENSOR
-                    , avgWind, gTodayMax
+                    , avgWind, gTodayMax, windDir
 #endif
 #ifdef TEMP_SENSOR
                     , avgTemp, gTodayTempMin, gTodayTempMax
@@ -677,6 +693,7 @@ struct DayAgg {
   uint32_t countWind = 0;
   float maxWind = NAN;
   float tempSum = 0.0f;
+  uint16_t windDir = 0;
   uint32_t tempCount = 0;
   float tempMin = NAN;
   float tempMax = NAN;
@@ -718,6 +735,7 @@ static void computeBucketSample(BucketSample& b, time_t bucketStart) {
   float avgWindMs = computeWind();
   b.avgWind = avgWindMs;
   b.maxWind = computeMaxWind(avgWindMs);
+  b.windDir = computeWindDir();
 #endif
 #ifdef AIR_QUAL_SENSOR
   // PM averages
@@ -790,19 +808,23 @@ void loadDaySummariesFromSD(time_t nowEpoch) {
       }
       int numCols = commaCount + 1;
 
-      String parts[11];
-      splitCSVLine(line, parts, numCols < 11 ? numCols : 11);
+      String parts[12];
+      splitCSVLine(line, parts, numCols < 12 ? numCols : 12);
 
       // Parse available columns (old format has 8 cols, new format has 11)
-      if (numCols < 7) continue;  // Need at least 7 columns for basic data
-      float windAvg = parseFloatOrNan(parts[2]);
-      float windMax = parseFloatOrNan(parts[3]);
-      float temp    = parseFloatOrNan(parts[4]);
-      float hum     = parseFloatOrNan(parts[5]);
-      float press   = parseFloatOrNan(parts[6]);
-      float pm1     = (numCols > 7) ? parseFloatOrNan(parts[7]) : NAN;
-      float pm25    = (numCols > 8) ? parseFloatOrNan(parts[8]) : NAN;
-      float pm10    = (numCols > 9) ? parseFloatOrNan(parts[9]) : NAN;
+      if (numCols < 8) continue;  // Need at least 8 columns for basic data
+      int col = 2;
+#ifdef WIND_SENSOR
+      float windAvg = parseFloatOrNan(parts[col++]);
+      float windMax = parseFloatOrNan(parts[col++]);
+//      uint16_t windDir = parseFloatOrNan(parts[col++]);
+#endif
+      float temp    = parseFloatOrNan(parts[col++]);
+      float hum     = parseFloatOrNan(parts[col++]);
+      float press   = parseFloatOrNan(parts[col++]);
+      float pm1     = (numCols > col) ? parseFloatOrNan(parts[col++]) : NAN;
+      float pm25    = (numCols > col) ? parseFloatOrNan(parts[col++]) : NAN;
+      float pm10    = (numCols > col) ? parseFloatOrNan(parts[col++]) : NAN;
 
       if (isfinite(windAvg)) { agg->sumWind += windAvg; agg->countWind++; }
       if (isfinite(windMax)) { if (!isfinite(agg->maxWind) || windMax > agg->maxWind) agg->maxWind = windMax; }
@@ -853,6 +875,7 @@ void loadDaySummariesFromSD(time_t nowEpoch) {
     if (!timeIsValid(entries[i].day)) continue;
     float avgWind = (a.countWind > 0) ? (a.sumWind / (float)a.countWind) : NAN;
     float maxWind = a.maxWind;
+    uint16_t windDir = a.windDir;
     float avgTemp = (a.tempCount > 0) ? (a.tempSum / (float)a.tempCount) : NAN;
     float avgPress = (a.pressCount > 0) ? (a.pressSum / (float)a.pressCount) : NAN;
     float avgPM1 = (a.pm1Count > 0) ? (a.pm1Sum / (float)a.pm1Count) : NAN;
@@ -860,7 +883,7 @@ void loadDaySummariesFromSD(time_t nowEpoch) {
     float avgPM10 = (a.pm10Count > 0) ? (a.pm10Sum / (float)a.pm10Count) : NAN;
     pushDaySummary(entries[i].day
 #ifdef WIND_SENSOR
-                  , avgWind, maxWind
+                  , avgWind, maxWind, windDir
 #endif
 #ifdef TEMP_SENSOR
                   , avgTemp, a.tempMin, a.tempMax
@@ -937,6 +960,7 @@ bool buildCurrentDaySummary(DaySummary& out) {
 #ifdef WIND_SENSOR
   out.avgWind = (windCount > 0) ? (sumWind / (float)windCount) : NAN;
   out.maxWind = (windCount > 0) ? maxWind : NAN;
+  out.windDir = computeWindDir();
 #endif
 #ifdef TEMP_SENSOR
   out.avgTemp = (tempCount > 0) ? (tempSum / (float)tempCount) : NAN;
@@ -981,6 +1005,7 @@ String buildApiDays(void) {
 #ifdef WIND_SENSOR
     out += "\"avgWind\":" + (isfinite(curDay.avgWind) ? String(curDay.avgWind, 3) : String("null")) + ",";
     out += "\"maxWind\":" + (isfinite(curDay.maxWind) ? String(curDay.maxWind, 3) : String("null")) + ",";
+    out += "\"windDir\":" + String(curDay.windDir) + ",";
 #endif
 #ifdef TEMP_SENSOR
     out += "\"avgTemp\":" + (isfinite(curDay.avgTemp) ? String(curDay.avgTemp, 2) : String("null")) + ",";
@@ -1023,6 +1048,7 @@ String buildApiDays(void) {
 #ifdef WIND_SENSOR
     out += "\"avgWind\":" + (isfinite(d.avgWind) ? String(d.avgWind, 3) : String("null")) + ",";
     out += "\"maxWind\":" + (isfinite(d.maxWind) ? String(d.maxWind, 3) : String("null")) + ",";
+    out += "\"windDir\":" + String(d.windDir) + ",";
 #endif
 #ifdef TEMP_SENSOR
     out += "\"avgTemp\":" + (isfinite(d.avgTemp) ? String(d.avgTemp, 2) : String("null")) + ",";

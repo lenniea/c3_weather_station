@@ -43,6 +43,7 @@ struct BucketSample {
 #ifdef WIND_SENSOR
   float avgWind;         // m/s (NAN = invalid)
   float maxWind;         // m/s (NAN = invalid)
+  uint16_t windDir;         // 0..<360 degrees
   uint32_t samples;
 #endif
 #ifdef TEMP_SENSOR
@@ -66,6 +67,7 @@ struct DaySummary {
 #ifdef WIND_SENSOR
   float avgWind;
   float maxWind;
+  uint16_t windDir;
 #endif
 #ifdef TEMP_SENSOR
   float avgTemp;
@@ -134,6 +136,7 @@ void finalizeCurrentBucket(time_t bucketStart);
 void startBucketAt(time_t bucketStart);
 
 void initDataLog(void);
+void reportLittleFS(void);
 
 
 #endif // __DATA_LOG_H__

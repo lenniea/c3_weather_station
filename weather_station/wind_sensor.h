@@ -25,11 +25,13 @@ extern volatile uint32_t gPulseCount;
 extern volatile uint32_t gLastPulseMicros;
 extern float gNowWindMS;
 
+extern uint16_t gWindAngle;
+
 #endif
 
 void clearWindToday(void);
 void clearWindSamples(void);
-void updateWind(float avgWind, float maxWind);
+void updateWind(float avgWind, float maxWind, uint16_t windDir);
 float calcWindPps(void);
 float computeWind(void);
 float computeMaxWind(float avgWindMs);
@@ -38,5 +40,7 @@ void setupWindPin(void);
 void initWindSensor(void);
 bool initWindVane(uint8_t i2cAddr = TMAG5273_I2C_ADDR);
 uint16_t getWindAngle(void);
+void accumWindDir(float currentSpeed, uint16_t currentDirDeg);
+uint16_t computeWindDir(void);
 
 #endif

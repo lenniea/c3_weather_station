@@ -2,7 +2,7 @@
 #include "config.h"
 #include "wind_sensor.h"
 
-#define SIMULATE_WIND   100     // 10 pulses/sec
+//#define SIMULATE_WIND   200     // 5 pulses/sec
 
 #ifdef WIND_SENSOR
 
@@ -27,13 +27,23 @@ volatile uint32_t gLastPulseMicros = 0;
 
 float gNowWindMS = 0.0f;
 
+//
+//  Wind Direction global varianbles
+//
+float windSumX = 0.0f;
+float windSumY = 0.0f;
+uint32_t windSampleCount = 0;
+
+uint16_t gWindAngle = 0;
+
 // Wind Sensor (Pulse-based Anemometer)
 namespace WindConfig {
   static constexpr int   PULSE_PIN = 0;                 // GPIO pin
   static constexpr float PPS_TO_MS = 1.75f / 20.0f;     // Calibration: 20pps = 1.75m/s
   static constexpr uint32_t PPS_WINDOW_MS = 1000;       // Calculate every 1 second
-  static constexpr uint32_t DEBOUNCE_US = 2000;         // 2ms debounce
 }
+
+#define DEBOUNCE_US     2000      // Cannot be a constant in flash!
 
 void clearWindToday(void) {
   gTodaySumOfBucketAvgs = 0.0f;
@@ -48,12 +58,19 @@ void clearWindSamples(void) {
   gBucketSamples = 0;
   gBucketPulseCount = 0;
   gBucketPulseElapsedMs = 0;
+
+  // Reset accumulators
+  windSumX = 0.0;
+  windSumY = 0.0;
+  windSampleCount = 0;
 }
 
-void updateWind(float avgWind, float maxWind) {
+void updateWind(float avgWind, float maxWind, uint16_t windAngle) {
   if (isfinite(avgWind)) {
     gTodaySumOfBucketAvgs += avgWind;
     gTodayBucketCount++;
+    // Accumulate average wind vector angle
+    accumWindDir(avgWind, windAngle);
   }
   if (isfinite(maxWind)) {
     if (maxWind > gTodayMax) gTodayMax = maxWind;
@@ -88,7 +105,7 @@ void IRAM_ATTR onPulse(void) {
   uint32_t elapsed = now - gLastPulseMicros;
 
   // Debounce: ignore pulses closer than DEBOUNCE_US microseconds
-  if (elapsed >= WindConfig::DEBOUNCE_US) {
+  if (elapsed >= DEBOUNCE_US) {
     gLastPulseMicros = now;
     gPulseCount++;
   }
@@ -157,7 +174,8 @@ void simulateWind(uint32_t msNow) {
   if (elapsed >= wind_period) {
       // call interrupt handler directly to simulate pulse!
       onPulse();
-      lastSimPulse = msNow;
+      lastSimPulse += wind_period;
+      gWindAngle = wind_dir;
   }
 }
 
@@ -167,9 +185,13 @@ void updateWindPPS(uint32_t msNow) {
 #ifdef SIMULATE_WIND
   simulateWind(msNow);
 #endif
-  noInterrupts();
   uint32_t elapsedMs = msNow - gLastPpsMillis;
   if (elapsedMs >= WindConfig::PPS_WINDOW_MS) {
+
+#ifndef SIMULATE_WIND
+    gWindAngle = getWindAngle();
+#endif
+    noInterrupts();
 
     uint32_t delta = gPulseCount;
     gPulseCount = 0;
@@ -192,9 +214,9 @@ void updateWindPPS(uint32_t msNow) {
     gBucketWindSum += gNowWindMS;
     gBucketSamples++;
 
-    gLastPpsMillis = msNow;
+    gLastPpsMillis += WindConfig::PPS_WINDOW_MS;
+    interrupts();
   }
-  interrupts();
 }
 
 void setupWindPin(void) {
@@ -203,6 +225,10 @@ void setupWindPin(void) {
 }
 
 void initWindSensor(void) {
+
+  // Initialize Wind Vane (direction) sensor
+  initWindVane();
+
   // Attach pulse interrupt after all initalization to avoid counting noise during boot
   gLastPulseMicros = micros();
   gPulseCount = 0;
@@ -253,16 +279,6 @@ uint16_t getWindAngle(void) {
   return (uint16_t) angleDegrees % 360U;
 }
 
-float sumX = 0.0;
-float sumY = 0.0;
-float sumSpeed = 0.0;
-int sampleCount = 0;
-
-float windSumX = 0.0f;
-float windSumY = 0.0f;;
-float windSumSpeed = 0.0f;
-uint32_t windSampleCount = 0;
-
 void accumWindDir(float currentSpeed, uint16_t currentDirDeg) {
 
   // --- 2. Convert wind direction from degrees to radians ---
@@ -280,14 +296,16 @@ void accumWindDir(float currentSpeed, uint16_t currentDirDeg) {
   // --- 3. Accumulate components ---
   windSumX += xComp;
   windSumY += yComp;
-  windSumSpeed += currentSpeed;
-  windSampleCount++;
+  ++windSampleCount;
 }
 
-void calcAveWindDir(void) {
-  float avgX = sumX / windSampleCount;
-  float avgY = sumY / windSampleCount;
-  float avgSpeedScalar = windSumSpeed / windSampleCount; // Simple scalar speed average (optional)
+// Compute average Wind Direction from vector sum
+uint16_t computeWindDir(void) {
+  if (windSampleCount == 0) {
+    return gWindAngle;
+  }
+  float avgX = windSumX / windSampleCount;
+  float avgY = windSumY / windSampleCount;
   
   // Calculate vector average speed and direction from mean X and Y
   float avgVectorSpeed = sqrt((avgX * avgX) + (avgY * avgY));
@@ -299,18 +317,14 @@ void calcAveWindDir(void) {
   if (avgDirDeg < 0) {
     avgDirDeg += 360.0;
   }
+  uint16_t avgWindDir = (uint16_t) avgDirDeg;
 
   // Print results to Serial Monitor
   Serial.print("Avg Vector Speed: ");
   Serial.print(avgVectorSpeed);
   Serial.print(" | Avg Direction: ");
-  Serial.println(avgDirDeg);
-
-  // Reset accumulators
-  windSumX = 0.0;
-  windSumY = 0.0;
-  windSumSpeed = 0.0;
-  windSampleCount = 0;
+  Serial.println(avgWindDir);
+  return avgWindDir;
 }
 
 #endif

@@ -184,7 +184,7 @@ static void invalidateFilesCache() {
 void accumulateTodayFromBucket(const BucketSample& b) {
 #ifdef WIND_SENSOR
   // Use full precision floats for daily summary
-  updateWind(b.avgWind, b.maxWind);
+  updateWind(b.avgWind, b.maxWind, b.windDir);
 #endif
   updateEnvMinMax(
 #ifdef TEMP_SENSOR
@@ -1078,7 +1078,7 @@ void setup() {
   // 1. Mount LittleFS partition and read config parameters
   gSdOk = LittleFS.begin(true);
   if (gSdOk) {
-    Serial.println("LittleFS initialized");
+    reportLittleFS();
   }
 
   // 2. Setup standard WiFiManager parameters
