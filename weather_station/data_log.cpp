@@ -178,7 +178,7 @@ String fmtLocal(time_t t) {
   struct tm tmLocal;
   localtime_r(&t, &tmLocal);
   char buf[32];
-  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tmLocal);
+  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M", &tmLocal);
   return String(buf);
 }
 
@@ -345,12 +345,16 @@ void logBucketToSD(const BucketSample& b) {
   if (!gSdOk) return;
 
   ensureDir("/data");
+#ifdef BACKUP
   ensureDir("/backup");
+#endif
 
   time_t bucketMidnightLocal = localMidnight(b.startEpoch);
   String ymd = ymdString(bucketMidnightLocal);
   String dailyFile = String("/data/") + ymd + ".csv";
+#ifdef BACKUP
   String backupFile = String("/backup/") + ymd + ".csv";
+#endif
 
   String header =
     "datetime,epoch"
@@ -397,7 +401,9 @@ void logBucketToSD(const BucketSample& b) {
   ;
 
   appendLine(dailyFile.c_str(), line.c_str(), header.c_str());
-//  appendLine(backupFile, line, header);
+#ifdef BACKUP
+  appendLine(backupFile, line, header);
+#endif
 }
 
 static float parseFloatOrNan(const String& s) {
@@ -497,7 +503,7 @@ void loadRecentBucketsFromSD(time_t nowEpoch) {
 #ifdef WIND_SENSOR
       b.avgWind = parseFloatOrNan(parts[col++]);
       b.maxWind = parseFloatOrNan(parts[col++]);
-//      b.windDir = parseFloatOrNan(parts[col++]);
+      b.windDir = parseFloatOrNan(parts[col++]);
 #endif
 #ifdef TEMP_SENSOR
       b.avgTempC = parseFloatOrNan(parts[col++]);
