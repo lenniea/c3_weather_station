@@ -230,7 +230,20 @@ body.dark-mode .zoom-btn.active {
 #theme-toggle:hover, #unit-toggle:hover {
   transform: scale(1.05);
 }
-  </style>
+  .file-delete-btn {
+  background: #d9534f;
+  color: #fff;
+  border: 1px solid #c9302c;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-weight: bold;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.file-delete-btn:hover {
+  background: #c9302c;
+}
+</style>
 </head>
 <body>
   <div class="flex-between" style="align-items:flex-start; gap:12px; flex-wrap:nowrap; margin-bottom:12px;">
@@ -292,7 +305,7 @@ body.dark-mode .zoom-btn.active {
         <span class="pill" style="font-weight:700;">Bucket: <span id="bucket_sec">--</span>s</span>
         <span class="pill" id="bmeok_pill" style="font-weight:700;">BME280: <span id="bmeok">--</span></span>
         <span class="pill" id="sdok_pill" style="font-weight:700;">SD Card: <span id="sdok">--</span></span>
-        <span class="pill" id="wifi_pill" style="font-weight:700;">WiFi: <span id="wifi">--</span> dBm (<span id="wifi_quality">--</span>)</span>
+        <span class="pill" id="wifi_pill" style="font-weight:700;">WiFi: <span id="wifi">--</span> dBm</span>
         <span class="pill" id="ram_pill" style="font-weight:700;">RAM: <span id="ram">--</span></span>
         <span class="pill" id="cpu_temp_pill" style="font-weight:700;">CPU Temp: <span id="cpu_temp">--</span><span id="cpu_temp_unit_lbl">°C</span></span>
       </div>
@@ -320,7 +333,21 @@ body.dark-mode .zoom-btn.active {
   </div>
   <div class="row" style="margin-top: 14px;">
     <div class="card card-full">
-      <div class="muted">Daily summaries</div>
+      <div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+    <h3 style="margin:0;">Daily summaries</h3>
+    <div style="display:flex; align-items:center; gap:6px;">
+      <input id="zipdays" type="number" min="1" value="7" style="width:64px;" />
+      <button onclick="downloadZip()">Download last N days as .ZIP</button>
+    </div>
+  </div>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead id="table_header"></thead>
+      <tbody id="days"></tbody>
+    </table>
+  </div>
+</div>
       <div class="table-wrapper">
         <div class="table-scroll">
           <table>
@@ -334,27 +361,6 @@ body.dark-mode .zoom-btn.active {
     </div>
   </div>
   <div class="row" style="margin-top: 14px;">
-    <div class="card card-full">
-      <div class="muted">Download data</div>
-      <div class="btnrow">
-        <input id="zipdays" type="number" min="1" value="7"/>
-        <button onclick="downloadZip()">Download last N days as .ZIP</button>
-      </div>
-      <div class="files">
-        <div class="filecol">
-          <div class="flex-between" style="margin-bottom:4px;">
-            <div class="muted">Daily files (/data)</div>
-            <div id="files_data_nav" style="display:none; align-items:center; gap:8px;">
-              <button class="small" onclick="navigateFiles('data', -1)" id="files_data_prev" style="padding:4px 8px;">←</button>
-              <span class="muted small" id="files_data_info"></span>
-              <button class="small" onclick="navigateFiles('data', 1)" id="files_data_next" style="padding:4px 8px;">→</button>
-              <select id="files_data_page" onchange="goToPage('data', this.value)" style="padding:2px 4px; border-radius:6px; border:1px solid #ddd; font-size:12px;"></select>
-            </div>
-          </div>
-          <div id="files_data" class="small"></div>
-        </div>
-      </div>
-    </div>
   </div>
   <div class="row" style="margin-top: 10px;">
     <div class="card card-full">

@@ -1408,20 +1408,56 @@ function renderPM(values){
   }
 }
 
-function renderDays(days){
+window.dailyFilesMap = window.dailyFilesMap || {};
+
+function renderDays(days) {
   window.lastDaysData = days;
   const tb = document.getElementById("days");
+  if (!tb) return;
   tb.innerHTML = "";
-  for (const d of days){
+
+  for (const d of days) {
     const tr = document.createElement("tr");
 
     for (const col of CONFIG.tableColumns) {
       const td = document.createElement("td");
 
       if (col.field === "day") {
+        td.style.whiteSpace = "nowrap";
         const dayLabel = (d.dayStartLocal && typeof d.dayStartLocal === "string")
           ? d.dayStartLocal.split(" ")[0] : "--";
-        td.textContent = dayLabel;
+
+        const compactDate = dayLabel.replace(/-/g, "");
+        const expectedFilename = `${compactDate}.csv`;
+        const fileMeta = window.dailyFilesMap[dayLabel] || window.dailyFilesMap[expectedFilename];
+
+        if (dayLabel !== "--") {
+          const filename = fileMeta ? fileMeta.filename : expectedFilename;
+          const dlUrl = `/download?filename=${encodeURIComponent(filename)}`;
+
+          const link = document.createElement("a");
+          link.href = dlUrl;
+          link.textContent = dayLabel;
+          link.title = `Download ${filename}`;
+          td.appendChild(link);
+
+          if (fileMeta && isFinite(fileMeta.size)) {
+            const sizeSpan = document.createElement("span");
+            sizeSpan.className = "muted";
+            sizeSpan.textContent = ` (${bytesPretty(fileMeta.size)})`;
+            td.appendChild(sizeSpan);
+          }
+
+          const deleteBtn = document.createElement("button");
+          deleteBtn.className = "small file-delete-btn";
+          deleteBtn.style.marginLeft = "6px";
+          deleteBtn.textContent = "×";
+          deleteBtn.title = `Delete ${filename}`;
+          deleteBtn.onclick = function() { deleteFile(filename, "data"); };
+          td.appendChild(deleteBtn);
+        } else {
+          td.textContent = "--";
+        }
       } else {
         const value = d[col.field];
         if (value != null && isFinite(value)) {
@@ -1434,7 +1470,7 @@ function renderDays(days){
       }
 
       if (col.bgColor) {
-        td.classList.add('table-alt-bg');
+        td.classList.add("table-alt-bg");
       }
 
       tr.appendChild(td);
@@ -1488,110 +1524,34 @@ const filesState = {
   data: { offset: 0, total: 0, files: [] }
 };
 
-async function loadFiles(dir){
-  const target = document.getElementById('files_data');
-  const navEl = document.getElementById('files_data_nav');
-  const infoEl = document.getElementById('files_data_info');
-  const prevBtn = document.getElementById('files_data_prev');
-  const nextBtn = document.getElementById('files_data_next');
-
-  if (!target) return;
-  target.textContent = "Loading...";
-
-  try{
+async function loadFiles(dir) {
+  try {
     const j = await fetchJSON(`/api/files?dir=${encodeURIComponent(dir)}`);
-    if (!j.ok){
-      target.textContent = `Error: ${j.error || 'unknown'}`;
-      if (navEl) navEl.style.display = "none";
-      return;
-    }
-    const files = (j.files || []).slice().sort((a,b)=> (b.path||'').localeCompare(a.path||''));
+    if (!j.ok) return;
 
+    const files = (j.files || []).slice().sort((a, b) => (b.path || "").localeCompare(a.path || ""));
     filesState[dir].files = files;
     filesState[dir].total = files.length;
 
-    if (!files.length){
-      target.textContent = "(none)";
-      if (navEl) navEl.style.display = "none";
-      return;
-    }
+    const map = {};
+    for (const f of files) {
+      const p = f.path || "";
+      const filename = p.substring(p.lastIndexOf("/") + 1);
+      map[filename] = { filename, size: f.size };
 
-    if (navEl) {
-      navEl.style.display = files.length > FILES_PER_PAGE ? "flex" : "none";
-    }
-
-    const maxOffset = Math.max(0, files.length - FILES_PER_PAGE);
-    if (filesState[dir].offset > maxOffset) filesState[dir].offset = maxOffset;
-    if (filesState[dir].offset < 0) filesState[dir].offset = 0;
-
-    const offset = filesState[dir].offset;
-    const pageFiles = files.slice(offset, offset + FILES_PER_PAGE);
-
-    // Create list safely using DOM APIs instead of innerHTML
-    const ul = document.createElement('ul');
-    ul.style.cssText = 'margin:8px 0; padding-left:18px';
-
-    for (const f of pageFiles){
-      const p = f.path;
-      const filename = p.substring(p.lastIndexOf('/') + 1);
-      const s = bytesPretty(f.size);
-      const dl = `/download?filename=${encodeURIComponent(filename)}`;
-
-      const li = document.createElement('li');
-
-      // Create download link
-      const link = document.createElement('a');
-      link.href = dl;
-      link.textContent = p; // Use textContent to prevent XSS
-      li.appendChild(link);
-
-      // Add file size
-      const sizeSpan = document.createElement('span');
-      sizeSpan.className = 'muted';
-      sizeSpan.textContent = ` (${s})`;
-      li.appendChild(sizeSpan);
-
-      // Add delete button
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'small file-delete-btn';
-      deleteBtn.textContent = 'Delete';
-      deleteBtn.onclick = function() { deleteFile(filename, dir); };
-      li.appendChild(document.createTextNode(' '));
-      li.appendChild(deleteBtn);
-
-      ul.appendChild(li);
-    }
-
-    // Clear target and append new list
-    target.textContent = '';
-    target.appendChild(ul);
-
-    const totalPages = Math.ceil(files.length / FILES_PER_PAGE);
-    const currentPage = Math.floor(offset / FILES_PER_PAGE) + 1;
-
-    if (infoEl) {
-      const start = offset + 1;
-      const end = Math.min(offset + FILES_PER_PAGE, files.length);
-      infoEl.textContent = `${start}-${end} of ${files.length}`;
-    }
-    if (prevBtn) prevBtn.disabled = offset === 0;
-    if (nextBtn) nextBtn.disabled = offset + FILES_PER_PAGE >= files.length;
-
-    const pageSelector = document.getElementById(`files_${dir}_page`);
-    if (pageSelector) {
-      pageSelector.innerHTML = '';
-      for (let i = 1; i <= totalPages; i++) {
-        const option = document.createElement('option');
-        option.value = i;
-        option.textContent = `Page ${i}`;
-        if (i === currentPage) option.selected = true;
-        pageSelector.appendChild(option);
+      const m = filename.match(/^(\d{4})(\d{2})(\d{2})\.csv$/i);
+      if (m) {
+        const isoDate = `${m[1]}-${m[2]}-${m[3]}`;
+        map[isoDate] = { filename, size: f.size };
       }
     }
+    window.dailyFilesMap = map;
 
-  }catch(e){
-    target.textContent = "Error loading list";
-    if (navEl) navEl.style.display = "none";
+    if (window.lastDaysData) {
+      renderDays(window.lastDaysData);
+    }
+  } catch (e) {
+    console.warn("Error loading file metadata", e);
   }
 }
 
@@ -1613,14 +1573,14 @@ function downloadZip(){
   window.location = `/download_zip?days=${encodeURIComponent(days)}`;
 }
 
-async function deleteFile(filename, dir){
-  if (!confirm("Delete this file from SD?")) return;
+async function deleteFile(filename, dir) {
+  if (!confirm(`Delete ${filename} from SD?`)) return;
   const pw = prompt("Password required to delete file:");
   if (!(pw && pw.trim().length)) {
     alert("Password required.");
     return;
   }
-  try{
+  try {
     const body = `filename=${encodeURIComponent(filename)}&pw=${encodeURIComponent(pw.trim())}`;
     const res = await fetch("/api/delete", {
       method: "POST",
@@ -1628,14 +1588,13 @@ async function deleteFile(filename, dir){
       body
     });
     const txt = await res.text();
-    if (res.ok){
+    if (res.ok) {
       alert("File deleted.");
-      filesState[dir].offset = 0;
-      loadFiles(dir);
+      await loadFiles(dir);
     } else {
       alert("Delete failed: " + txt);
     }
-  }catch(e){
+  } catch (e) {
     alert("Error deleting file");
   }
 }
@@ -1742,7 +1701,6 @@ function updateCurrentReadings(now) {
 
   // WiFi pill with colors based on quality
   document.getElementById("wifi").textContent = now.wifi_rssi !== null && now.wifi_rssi !== undefined ? String(now.wifi_rssi) : "--";
-  document.getElementById("wifi_quality").textContent = wifiQuality(now.wifi_rssi);
   const wifiPill = document.getElementById("wifi_pill");
   if (now.wifi_rssi !== null && now.wifi_rssi !== undefined && isFinite(now.wifi_rssi)) {
     if (now.wifi_rssi >= -60) { // Excellent or Good
@@ -1795,7 +1753,8 @@ function updateCurrentReadings(now) {
   const heapSize = now.heap_size !== null && now.heap_size !== undefined ? now.heap_size : 0;
   const usedHeap = heapSize > 0 ? heapSize - freeHeap : 0;
   const pctUsed = heapSize > 0 ? Math.round((usedHeap / heapSize) * 100) : 0;
-  document.getElementById("ram").textContent = heapSize > 0 ? `${bytesPretty(freeHeap)} free (${pctUsed}% used)` : "--";
+  const pctFree = heapSize > 0 ? Math.max(0, 100 - pctUsed) : 0;
+  document.getElementById("ram").textContent = heapSize > 0 ? `${bytesPretty(freeHeap)} (${pctFree}%)` : "--";
   const ramPill = document.getElementById("ram_pill");
   if (heapSize > 0) {
     if (pctUsed > 90) {
@@ -1962,7 +1921,7 @@ function combinedTick() {
     debugLog('Starting tick');
 
     // Load plots and summaries once on init
-    await slowTick();
+    await Promise.all([loadFiles('data'), slowTick()]);
 
     // Apply saved zoom level after data is loaded
     setZoomLevel(currentZoomLevel, false);
@@ -1970,7 +1929,6 @@ function combinedTick() {
 
     // Then update current readings every 2s, plots every 14s (7 ticks)
     setInterval(combinedTick, 2000);
-    loadFiles('data');
 
     debugLog('Initialization complete');
   } catch (error) {
