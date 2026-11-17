@@ -25,12 +25,13 @@ static const PlotConfig PLOTS[] = {
 #ifdef WIND_SENSOR
   {
     "wind",
-    "Wind Speed",
+    "Wind",
     "km/h",
     3.6f,  // m/s to km/h
     {
       {"avgWind", "black", "Wind", true},
-      {"maxWind", "#f0ad4e", "Gust", true}
+      {"maxWind", "#f0ad4e", "Gust", true},
+      {"wind_dir", "#0000ff", "Dir", true}
     },
     2
   },
@@ -107,9 +108,9 @@ struct TableColumn {
 static const TableColumn TABLE_COLUMNS[] = {
   {"day", "Day", "", 1.0f, 0, "", ""},
 #ifdef WIND_SENSOR
-  {"avgWind", "avg", "km/h", 3.6f, 1, "#f8f8f8", "Wind Speed"},
-  {"maxWind", "max", "km/h", 3.6f, 1, "#f8f8f8", "Wind Speed"},
-  {"windDir", "avg", "°",  1.0f, 0, "#f8f8f8", "Wind Direction"},
+  {"avgWind", "avg", "km/h", 3.6f, 1, "#f8f8f8", "Wind"},
+  {"maxWind", "gust", "km/h", 3.6f, 1, "#f8f8f8", "Wind"},
+  {"wind_dir", "dir", "°",  1.0f, 0, "#f8f8f8", "Wind"},
 #endif
 #ifdef TEMP_SENSOR
   {"avgTemp", "avg", "°C", 1.0f, 1, "", "Temperature"},
@@ -1020,34 +1021,34 @@ String buildApiDays(void) {
   if (hasCurDay) {
     out += "{";
     out += "\"dayStartEpoch\":" + String((uint32_t)curDay.dayStartEpoch) + ",";
-    out += "\"dayStartLocal\":\"" + fmtLocal(curDay.dayStartEpoch) + "\",";
+    out += "\"dayStartLocal\":\"" + fmtLocal(curDay.dayStartEpoch) + "\"";
 #ifdef WIND_SENSOR
-    out += "\"avgWind\":" + (isfinite(curDay.avgWind) ? String(curDay.avgWind, 3) : String("null")) + ",";
-    out += "\"maxWind\":" + (isfinite(curDay.maxWind) ? String(curDay.maxWind, 3) : String("null")) + ",";
-    out += "\"windDir\":" + String(curDay.windDir) + ",";
+    out += ",\"avgWind\":" + (isfinite(curDay.avgWind) ? String(curDay.avgWind, 3) : String("null"));
+    out += ",\"maxWind\":" + (isfinite(curDay.maxWind) ? String(curDay.maxWind, 3) : String("null"));
+    out += ",\"wind_dir\":" + String(curDay.windDir);
 #endif
 #ifdef TEMP_SENSOR
-    out += "\"avgTemp\":" + (isfinite(curDay.avgTemp) ? String(curDay.avgTemp, 2) : String("null")) + ",";
-    out += "\"minTemp\":" + (isfinite(curDay.minTemp) ? String(curDay.minTemp, 2) : String("null")) + ",";
-    out += "\"maxTemp\":" + (isfinite(curDay.maxTemp) ? String(curDay.maxTemp, 2) : String("null")) + ",";
+    out += ",\"avgTemp\":" + (isfinite(curDay.avgTemp) ? String(curDay.avgTemp, 2) : String("null"));
+    out += ",\"minTemp\":" + (isfinite(curDay.minTemp) ? String(curDay.minTemp, 2) : String("null"));
+    out += ",\"maxTemp\":" + (isfinite(curDay.maxTemp) ? String(curDay.maxTemp, 2) : String("null"));
 #endif
 #ifdef HUMID_SENSOR
-    out += "\"avgHum\":" + (isfinite(curDay.avgHum) ? String(curDay.avgHum, 2) : String("null")) + ",";
-    out += "\"minHum\":" + (isfinite(curDay.minHum) ? String(curDay.minHum, 2) : String("null")) + ",";
-    out += "\"maxHum\":" + (isfinite(curDay.maxHum) ? String(curDay.maxHum, 2) : String("null")) + ",";
+    out += ",\"avgHum\":" + (isfinite(curDay.avgHum) ? String(curDay.avgHum, 2) : String("null"));
+    out += ",\"minHum\":" + (isfinite(curDay.minHum) ? String(curDay.minHum, 2) : String("null"));
+    out += ",\"maxHum\":" + (isfinite(curDay.maxHum) ? String(curDay.maxHum, 2) : String("null"));
 #endif
 #ifdef PRESS_SENSOR
-    out += "\"avgPress\":" + (isfinite(curDay.avgPress) ? String(curDay.avgPress, 2) : String("null")) + ",";
-    out += "\"minPress\":" + (isfinite(curDay.minPress) ? String(curDay.minPress, 2) : String("null")) + ",";
-    out += "\"maxPress\":" + (isfinite(curDay.maxPress) ? String(curDay.maxPress, 2) : String("null")) + ",";
+    out += ",\"avgPress\":" + (isfinite(curDay.avgPress) ? String(curDay.avgPress, 2) : String("null"));
+    out += ",\"minPress\":" + (isfinite(curDay.minPress) ? String(curDay.minPress, 2) : String("null"));
+    out += ",\"maxPress\":" + (isfinite(curDay.maxPress) ? String(curDay.maxPress, 2) : String("null"));
 #endif
 #ifdef AIR_QUAL_SENSOR
-    out += "\"avgPM1\":" + (isfinite(curDay.avgPM1) ? String(curDay.avgPM1, 1) : String("null")) + ",";
-    out += "\"maxPM1\":" + (isfinite(curDay.maxPM1) ? String(curDay.maxPM1, 1) : String("null")) + ",";
-    out += "\"avgPM25\":" + (isfinite(curDay.avgPM25) ? String(curDay.avgPM25, 1) : String("null")) + ",";
-    out += "\"maxPM25\":" + (isfinite(curDay.maxPM25) ? String(curDay.maxPM25, 1) : String("null")) + ",";
-    out += "\"avgPM10\":" + (isfinite(curDay.avgPM10) ? String(curDay.avgPM10, 1) : String("null")) + ",";
-    out += "\"maxPM10\":" + (isfinite(curDay.maxPM10) ? String(curDay.maxPM10, 1) : String("null"));
+    out += ",\"avgPM1\":" + (isfinite(curDay.avgPM1) ? String(curDay.avgPM1, 1) : String("null"));
+    out += ",\"maxPM1\":" + (isfinite(curDay.maxPM1) ? String(curDay.maxPM1, 1) : String("null"));
+    out += ",\"avgPM25\":" + (isfinite(curDay.avgPM25) ? String(curDay.avgPM25, 1) : String("null"));
+    out += ",\"maxPM25\":" + (isfinite(curDay.maxPM25) ? String(curDay.maxPM25, 1) : String("null"));
+    out += ",\"avgPM10\":" + (isfinite(curDay.avgPM10) ? String(curDay.avgPM10, 1) : String("null"));
+    out += ",\"maxPM10\":" + (isfinite(curDay.maxPM10) ? String(curDay.maxPM10, 1) : String("null"));
 #endif
     out += "}";
     firstOut = false;
@@ -1063,34 +1064,34 @@ String buildApiDays(void) {
     firstOut = false;
     out += "{";
     out += "\"dayStartEpoch\":" + String((uint32_t)d.dayStartEpoch) + ",";
-    out += "\"dayStartLocal\":\"" + fmtLocal(d.dayStartEpoch) + "\",";
+    out += "\"dayStartLocal\":\"" + fmtLocal(d.dayStartEpoch) + "\"";
 #ifdef WIND_SENSOR
-    out += "\"avgWind\":" + (isfinite(d.avgWind) ? String(d.avgWind, 3) : String("null")) + ",";
-    out += "\"maxWind\":" + (isfinite(d.maxWind) ? String(d.maxWind, 3) : String("null")) + ",";
-    out += "\"windDir\":" + String(d.windDir) + ",";
+    out += ",\"avgWind\":" + (isfinite(d.avgWind) ? String(d.avgWind, 3) : String("null"));
+    out += ",\"maxWind\":" + (isfinite(d.maxWind) ? String(d.maxWind, 3) : String("null"));
+    out += ",\"wind_dir\":" + String(d.windDir);
 #endif
 #ifdef TEMP_SENSOR
-    out += "\"avgTemp\":" + (isfinite(d.avgTemp) ? String(d.avgTemp, 2) : String("null")) + ",";
-    out += "\"minTemp\":" + (isfinite(d.minTemp) ? String(d.minTemp, 2) : String("null")) + ",";
-    out += "\"maxTemp\":" + (isfinite(d.maxTemp) ? String(d.maxTemp, 2) : String("null")) + ",";
+    out += ",\"avgTemp\":" + (isfinite(d.avgTemp) ? String(d.avgTemp, 2) : String("null"));
+    out += ",\"minTemp\":" + (isfinite(d.minTemp) ? String(d.minTemp, 2) : String("null"));
+    out += ",\"maxTemp\":" + (isfinite(d.maxTemp) ? String(d.maxTemp, 2) : String("null"));
 #endif
 #ifdef HUMID_SENSOR
-    out += "\"avgHum\":" + (isfinite(d.avgHum) ? String(d.avgHum, 2) : String("null")) + ",";
-    out += "\"minHum\":" + (isfinite(d.minHum) ? String(d.minHum, 2) : String("null")) + ",";
-    out += "\"maxHum\":" + (isfinite(d.maxHum) ? String(d.maxHum, 2) : String("null")) + ",";
+    out += ",\"avgHum\":" + (isfinite(d.avgHum) ? String(d.avgHum, 2) : String("null"));
+    out += ",\"minHum\":" + (isfinite(d.minHum) ? String(d.minHum, 2) : String("null"));
+    out += ",\"maxHum\":" + (isfinite(d.maxHum) ? String(d.maxHum, 2) : String("null"));
 #endif
 #ifdef PRESS_SENSOR
-    out += "\"avgPress\":" + (isfinite(d.avgPress) ? String(d.avgPress, 2) : String("null")) + ",";
-    out += "\"minPress\":" + (isfinite(d.minPress) ? String(d.minPress, 2) : String("null")) + ",";
-    out += "\"maxPress\":" + (isfinite(d.maxPress) ? String(d.maxPress, 2) : String("null")) + ",";
+    out += ",\"avgPress\":" + (isfinite(d.avgPress) ? String(d.avgPress, 2) : String("null"));
+    out += ",\"minPress\":" + (isfinite(d.minPress) ? String(d.minPress, 2) : String("null"));
+    out += ",\"maxPress\":" + (isfinite(d.maxPress) ? String(d.maxPress, 2) : String("null"));
 #endif
 #ifdef AIR_QUAL_SENSOR
-    out += "\"avgPM1\":" + (isfinite(d.avgPM1) ? String(d.avgPM1, 1) : String("null")) + ",";
-    out += "\"maxPM1\":" + (isfinite(d.maxPM1) ? String(d.maxPM1, 1) : String("null")) + ",";
-    out += "\"avgPM25\":" + (isfinite(d.avgPM25) ? String(d.avgPM25, 1) : String("null")) + ",";
-    out += "\"maxPM25\":" + (isfinite(d.maxPM25) ? String(d.maxPM25, 1) : String("null")) + ",";
-    out += "\"avgPM10\":" + (isfinite(d.avgPM10) ? String(d.avgPM10, 1) : String("null")) + ",";
-    out += "\"maxPM10\":" + (isfinite(d.maxPM10) ? String(d.maxPM10, 1) : String("null"));
+    out += ",\"avgPM1\":" + (isfinite(d.avgPM1) ? String(d.avgPM1, 1) : String("null"));
+    out += ",\"maxPM1\":" + (isfinite(d.maxPM1) ? String(d.maxPM1, 1) : String("null"));
+    out += ",\"avgPM25\":" + (isfinite(d.avgPM25) ? String(d.avgPM25, 1) : String("null"));
+    out += ",\"maxPM25\":" + (isfinite(d.maxPM25) ? String(d.maxPM25, 1) : String("null"));
+    out += ",\"avgPM10\":" + (isfinite(d.avgPM10) ? String(d.avgPM10, 1) : String("null"));
+    out += ",\"maxPM10\":" + (isfinite(d.maxPM10) ? String(d.maxPM10, 1) : String("null"));
 #endif
     out += "}";
   }
