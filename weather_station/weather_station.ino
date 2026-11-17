@@ -596,6 +596,7 @@ static String buildBucketJson(const BucketSample& b) {
 #ifdef WIND_SENSOR
   float avg_wind = (b.avgWind != 255) ? ((float)b.avgWind / 2.0f) : NAN;
   float max_wind = (b.maxWind != 255) ? ((float)b.maxWind / 2.0f) : NAN;
+  uint16_t wind_dir = b.windDir;
 #endif
 #ifdef TEMP_SENSOR
   float temp_c = (b.avgTempC != -128) ? (float)b.avgTempC : NAN;
@@ -614,8 +615,10 @@ static String buildBucketJson(const BucketSample& b) {
   out += numOrNull(avg_wind, 3);
   out += ",\"wind_speed_max\":";
   out += numOrNull(max_wind, 3);
-  out += ",\"wind_speed_samples\":";
-  out += String(b.samples);
+  out += ",\"wind_dir\":";
+  out += String(wind_dir);
+//  out += ",\"wind_speed_samples\":";
+//  out += String(b.samples);
 #endif
 #ifdef TEMP_SENSOR
   out += ",\"temperature\":";
@@ -643,13 +646,13 @@ static String buildBucketJson(const BucketSample& b) {
 
 static String buildBucketJsonCompact(const BucketSample& b) {
   // Compact format for internal UI - array format with full precision
-  // Format: [epoch, avgWind, maxWind, samples, tempC, humRH, pressHpa, pm1, pm25, pm10]
+  // Format: [epoch, avgWind, maxWind, windDir, samples, tempC, humRH, pressHpa (, pm1, pm25, pm10)]
   if (!timeIsValid(b.startEpoch)) return "";
 
-  // Use full precision floats directly
 #ifdef WIND_SENSOR
   float avg_wind = b.avgWind;
   float max_wind = b.maxWind;
+  uint16_t wind_dir = b.windDir;
 #endif
 #ifdef TEMP_SENSOR
   float temp_c = b.avgTempC;
@@ -663,13 +666,15 @@ static String buildBucketJsonCompact(const BucketSample& b) {
 
   String out = "[";
   out += String((uint32_t)b.startEpoch);
-  out += ",";
 #ifdef WIND_SENSOR
+  out += ",";
   out += numOrNull(avg_wind, 3);
   out += ",";
   out += numOrNull(max_wind, 3);
   out += ",";
-  out += String(b.samples);
+  out += String(wind_dir);
+//  out += ",";
+//  out += String(b.samples);
 #endif
 #ifdef TEMP_SENSOR
   out += ",";

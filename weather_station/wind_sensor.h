@@ -42,5 +42,6 @@ bool initWindVane(uint8_t i2cAddr = TMAG5273_I2C_ADDR);
 uint16_t getWindAngle(void);
 void accumWindDir(float currentSpeed, uint16_t currentDirDeg);
 uint16_t computeWindDir(void);
+uint16_t computeTodayWindDir(void);
 
 #endif

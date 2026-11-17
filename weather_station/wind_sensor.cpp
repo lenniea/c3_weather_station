@@ -28,11 +28,15 @@ volatile uint32_t gLastPulseMicros = 0;
 float gNowWindMS = 0.0f;
 
 //
-//  Wind Direction global varianbles
+//  Wind Direction global variables (bucket vs. daily accumulators)
 //
-float windSumX = 0.0f;
-float windSumY = 0.0f;
-uint32_t windSampleCount = 0;
+float gBucketWindSumX = 0.0f;
+float gBucketWindSumY = 0.0f;
+uint32_t gBucketWindDirCount = 0;
+
+float gTodayWindSumX = 0.0f;
+float gTodayWindSumY = 0.0f;
+uint32_t gTodayWindDirCount = 0;
 
 uint16_t gWindAngle = 0;
 
@@ -49,6 +53,9 @@ void clearWindToday(void) {
   gTodaySumOfBucketAvgs = 0.0f;
   gTodayBucketCount = 0;
   gTodayMax = 0.0f;
+  gTodayWindSumX = 0.0f;
+  gTodayWindSumY = 0.0f;
+  gTodayWindDirCount = 0;
 }
 
 void clearWindSamples(void) {
@@ -59,18 +66,21 @@ void clearWindSamples(void) {
   gBucketPulseCount = 0;
   gBucketPulseElapsedMs = 0;
 
-  // Reset accumulators
-  windSumX = 0.0;
-  windSumY = 0.0;
-  windSampleCount = 0;
+  // Reset per-bucket direction accumulators
+  gBucketWindSumX = 0.0f;
+  gBucketWindSumY = 0.0f;
+  gBucketWindDirCount = 0;
 }
 
 void updateWind(float avgWind, float maxWind, uint16_t windAngle) {
   if (isfinite(avgWind)) {
     gTodaySumOfBucketAvgs += avgWind;
     gTodayBucketCount++;
-    // Accumulate average wind vector angle
-    accumWindDir(avgWind, windAngle);
+    // Accumulate daily vector average weighted by bucket wind speed
+    float dirRad = radians(windAngle);
+    gTodayWindSumX += avgWind * sin(dirRad);
+    gTodayWindSumY += avgWind * cos(dirRad);
+    gTodayWindDirCount++;
   }
   if (isfinite(maxWind)) {
     if (maxWind > gTodayMax) gTodayMax = maxWind;
@@ -155,6 +165,7 @@ void parseLine(const char* buf) {
   wind_dir = parts[1].toInt();
   showWindParms();
 }
+
 //
 //  simulateWind sensor from period,dir data from the Serial console
 //  Generates "virtual" interrupts and provides wind vane sensor not detected
@@ -214,6 +225,9 @@ void updateWindPPS(uint32_t msNow) {
     gBucketWindSum += gNowWindMS;
     gBucketSamples++;
 
+    // Accumulate 1-second wind vector into current bucket
+    accumWindDir(gNowWindMS, gWindAngle);
+
     gLastPpsMillis += WindConfig::PPS_WINDOW_MS;
     interrupts();
   }
@@ -247,12 +261,12 @@ void initWindSensor(void) {
 TMAG5273 sensor; // Create sensor object
 
 // Default I2C address for TMAG5273 is usually 0x22 or 0x35 depending on variant
-uint8_t i2cAddress = TMAG5273_I2C_ADDRESS_INITIAL; //
+uint8_t i2cAddress = TMAG5273_I2C_ADDRESS_INITIAL;
 
 bool initWindVane(uint8_t i2cAddress) {
 
   // Initialize the sensor
-  if (sensor.begin(i2cAddress, Wire) == false) { //
+  if (sensor.begin(i2cAddress, Wire) == false) {
     Serial.println("TMAG5273 sensor not found. Check wiring!");
     return false;
   }
@@ -262,7 +276,7 @@ bool initWindVane(uint8_t i2cAddress) {
   sensor.setAngleEn(TMAG5273_XY_ANGLE_CALCULATION); // Enable CORDIC calculation on XY
   
   // Set conversion averaging to smooth out noise (Optional but recommended)
-  sensor.setConvAvg(TMAG5273_X32_CONVERSION); //
+  sensor.setConvAvg(TMAG5273_X32_CONVERSION);
   
   Serial.println("TMAG5273 Initialized successfully.");
   return true;
@@ -270,7 +284,7 @@ bool initWindVane(uint8_t i2cAddress) {
 
 uint16_t getWindAngle(void) {
   // Read the angle calculated by the internal hardware engine
-  float rawAngle = sensor.getAngleResult(); //
+  float rawAngle = sensor.getAngleResult();
 
   // Enforce 0-359 integer range
   int angleDegrees = (int) rawAngle;
@@ -280,52 +294,38 @@ uint16_t getWindAngle(void) {
 }
 
 void accumWindDir(float currentSpeed, uint16_t currentDirDeg) {
-
-  // --- 2. Convert wind direction from degrees to radians ---
-  // Note: Meteorological wind direction is where the wind is COMING FROM.
-  // Using standard math: angle in radians
   float dirRad = radians(currentDirDeg);
-
-  // Calculate X and Y vector components
-  // X = speed * sin(dir) or cos depending on convention; 
-  // Standard meteorological vector: X = -speed * sin(dir), Y = -speed * cos(dir)
-  // Or standard math unit vector:
   float xComp = currentSpeed * sin(dirRad);
   float yComp = currentSpeed * cos(dirRad);
 
-  // --- 3. Accumulate components ---
-  windSumX += xComp;
-  windSumY += yComp;
-  ++windSampleCount;
+  gBucketWindSumX += xComp;
+  gBucketWindSumY += yComp;
+  ++gBucketWindDirCount;
 }
 
-// Compute average Wind Direction from vector sum
-uint16_t computeWindDir(void) {
-  if (windSampleCount == 0) {
+static uint16_t vectorToDegrees(float sumX, float sumY, uint32_t count) {
+  if (count == 0 || (sumX == 0.0f && sumY == 0.0f)) {
     return gWindAngle;
   }
-  float avgX = windSumX / windSampleCount;
-  float avgY = windSumY / windSampleCount;
-  
-  // Calculate vector average speed and direction from mean X and Y
-  float avgVectorSpeed = sqrt((avgX * avgX) + (avgY * avgY));
-  
-  // atan2(avgX, avgY) gives direction coming from (in radians), convert to degrees [0, 360)
+  float avgX = sumX / count;
+  float avgY = sumY / count;
+
   float avgDirRad = atan2(avgX, avgY);
   float avgDirDeg = degrees(avgDirRad);
-  
-  if (avgDirDeg < 0) {
-    avgDirDeg += 360.0;
+  if (avgDirDeg < 0.0f) {
+    avgDirDeg += 360.0f;
   }
-  uint16_t avgWindDir = (uint16_t) avgDirDeg;
+  return ((uint16_t)roundf(avgDirDeg)) % 360U;
+}
 
-  // Print results to Serial Monitor
-  Serial.print("Avg Vector Speed: ");
-  Serial.print(avgVectorSpeed);
-  Serial.print(" | Avg Direction: ");
-  Serial.println(avgWindDir);
-  return avgWindDir;
+// Compute average Wind Direction for the current bucket
+uint16_t computeWindDir(void) {
+  return vectorToDegrees(gBucketWindSumX, gBucketWindSumY, gBucketWindDirCount);
+}
+
+// Compute average Wind Direction across today's completed buckets
+uint16_t computeTodayWindDir(void) {
+  return vectorToDegrees(gTodayWindSumX, gTodayWindSumY, gTodayWindDirCount);
 }
 
 #endif
-

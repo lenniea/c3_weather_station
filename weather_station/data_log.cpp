@@ -109,8 +109,7 @@ static const TableColumn TABLE_COLUMNS[] = {
 #ifdef WIND_SENSOR
   {"avgWind", "avg", "km/h", 3.6f, 1, "#f8f8f8", "Wind Speed"},
   {"maxWind", "max", "km/h", 3.6f, 1, "#f8f8f8", "Wind Speed"},
-  {"windDir", "avg", "°",  1.0f, 1, "#f8f8f8", "Wind Direction"},
-  {"avgDir", "avg", "°", 1.0f, 1, "", "Wind Direction"},
+  {"windDir", "avg", "°",  1.0f, 0, "#f8f8f8", "Wind Direction"},
 #endif
 #ifdef TEMP_SENSOR
   {"avgTemp", "avg", "°C", 1.0f, 1, "", "Temperature"},
@@ -232,7 +231,7 @@ bool appendLine(const char* path, const char* line, const char* headerIfNew) {
 String buildApiNow(void) {
 #ifdef WIND_SENSOR
   float pps = calcWindPps();
-  uint16_t wind_dir = computeWindDir();
+  uint16_t wind_dir = gWindAngle;
 #endif
   time_t nowE = epochNow();
 #ifdef PRESS_SENSOR
@@ -553,9 +552,7 @@ void loadRecentBucketsFromSD(time_t nowEpoch) {
 
 void clearTodayAggregates(void) {
 #ifdef WIND_SENSOR
-  gTodaySumOfBucketAvgs = 0.0f;
-  gTodayBucketCount = 0;
-  gTodayMax = 0.0f;
+  clearWindToday();
 #endif
 #ifdef TEMP_SENSOR
   gTodayTempSum = 0.0f;
@@ -654,7 +651,7 @@ void maybeRolloverDay(time_t nowEpoch) {
   if (midnight != gTodayMidnightEpoch) {
 #ifdef WIND_SENSOR
       float avgWind = gTodayBucketCount ? (gTodaySumOfBucketAvgs / (float)gTodayBucketCount) : NAN;
-      uint16_t windDir = computeWindDir();
+      uint16_t windDir = computeTodayWindDir();
 #endif
 #ifdef TEMP_SENSOR
       float avgTemp = (gTodayTempCount > 0) ? (gTodayTempSum / (float)gTodayTempCount) : NAN;
@@ -698,8 +695,9 @@ struct DayAgg {
   float sumWind = 0.0f;
   uint32_t countWind = 0;
   float maxWind = NAN;
+  float windSumX = 0.0f;
+  float windSumY = 0.0f;
   float tempSum = 0.0f;
-  uint16_t windDir = 0;
   uint32_t tempCount = 0;
   float tempMin = NAN;
   float tempMax = NAN;
@@ -823,7 +821,7 @@ void loadDaySummariesFromSD(time_t nowEpoch) {
 #ifdef WIND_SENSOR
       float windAvg = parseFloatOrNan(parts[col++]);
       float windMax = parseFloatOrNan(parts[col++]);
-//      uint16_t windDir = parseFloatOrNan(parts[col++]);
+      float windDirVal = parseFloatOrNan(parts[col++]);
 #endif
       float temp    = parseFloatOrNan(parts[col++]);
       float hum     = parseFloatOrNan(parts[col++]);
@@ -832,8 +830,18 @@ void loadDaySummariesFromSD(time_t nowEpoch) {
       float pm25    = (numCols > col) ? parseFloatOrNan(parts[col++]) : NAN;
       float pm10    = (numCols > col) ? parseFloatOrNan(parts[col++]) : NAN;
 
-      if (isfinite(windAvg)) { agg->sumWind += windAvg; agg->countWind++; }
+#ifdef WIND_SENSOR
+      if (isfinite(windAvg)) {
+        agg->sumWind += windAvg;
+        agg->countWind++;
+        if (isfinite(windDirVal)) {
+          float rad = radians(windDirVal);
+          agg->windSumX += windAvg * sin(rad);
+          agg->windSumY += windAvg * cos(rad);
+        }
+      }
       if (isfinite(windMax)) { if (!isfinite(agg->maxWind) || windMax > agg->maxWind) agg->maxWind = windMax; }
+#endif
       if (isfinite(temp)) {
         if (!isfinite(agg->tempMin) || temp < agg->tempMin) agg->tempMin = temp;
         if (!isfinite(agg->tempMax) || temp > agg->tempMax) agg->tempMax = temp;
@@ -881,7 +889,12 @@ void loadDaySummariesFromSD(time_t nowEpoch) {
     if (!timeIsValid(entries[i].day)) continue;
     float avgWind = (a.countWind > 0) ? (a.sumWind / (float)a.countWind) : NAN;
     float maxWind = a.maxWind;
-    uint16_t windDir = a.windDir;
+    uint16_t windDir = 0;
+    if (a.windSumX != 0.0f || a.windSumY != 0.0f) {
+      float deg = degrees(atan2(a.windSumX, a.windSumY));
+      if (deg < 0.0f) deg += 360.0f;
+      windDir = ((uint16_t)roundf(deg)) % 360U;
+    }
     float avgTemp = (a.tempCount > 0) ? (a.tempSum / (float)a.tempCount) : NAN;
     float avgPress = (a.pressCount > 0) ? (a.pressSum / (float)a.pressCount) : NAN;
     float avgPM1 = (a.pm1Count > 0) ? (a.pm1Sum / (float)a.pm1Count) : NAN;
@@ -966,7 +979,7 @@ bool buildCurrentDaySummary(DaySummary& out) {
 #ifdef WIND_SENSOR
   out.avgWind = (windCount > 0) ? (sumWind / (float)windCount) : NAN;
   out.maxWind = (windCount > 0) ? maxWind : NAN;
-  out.windDir = computeWindDir();
+  out.windDir = computeTodayWindDir();
 #endif
 #ifdef TEMP_SENSOR
   out.avgTemp = (tempCount > 0) ? (tempSum / (float)tempCount) : NAN;

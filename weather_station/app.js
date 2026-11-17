@@ -1,3 +1,178 @@
+
+// ==================== UNIT SWITCHING & NICE AXIS ====================
+let currentUnitSystem = 'metric'; // 'metric' or 'imperial'
+
+const UNIT_DEFS = {
+  wind:  { metric: { unit: 'km/h', factor: 3.6, decimals: 1 }, imperial: { unit: 'MPH',  factor: 2.236936, decimals: 1 } },
+  temp:  { metric: { unit: '°C',   toVal: c => c, decimals: 1 }, imperial: { unit: '°F',   toVal: c => (c * 9/5) + 32, decimals: 1 } },
+  press: { metric: { unit: 'hPa',  factor: 1.0, decimals: 1 }, imperial: { unit: 'inHg', factor: 0.02953, decimals: 2 } },
+  hum:   { metric: { unit: '%',    factor: 1.0, decimals: 1 }, imperial: { unit: '%',    factor: 1.0, decimals: 1 } },
+  pm:    { metric: { unit: 'μg/m³',factor: 1.0, decimals: 1 }, imperial: { unit: 'μg/m³',factor: 1.0, decimals: 1 } }
+};
+
+function convertPlotVal(key, val) {
+  if (val === null || val === undefined || !isFinite(val)) return null;
+  const v = Number(val);
+  if (key === 'wind') return v * UNIT_DEFS.wind[currentUnitSystem].factor;
+  if (key === 'temp') return UNIT_DEFS.temp[currentUnitSystem].toVal(v);
+  if (key === 'press') return v * UNIT_DEFS.press[currentUnitSystem].factor;
+  return v;
+}
+
+function getPlotUnit(key) {
+  return UNIT_DEFS[key] ? UNIT_DEFS[key][currentUnitSystem].unit : '';
+}
+
+function convertTableCol(col, val) {
+  if (val === null || val === undefined || !isFinite(val)) return null;
+  const v = Number(val);
+  if (currentUnitSystem === 'metric') return v * col.conversionFactor;
+  if (col.field.includes('Wind')) return v * 2.236936;
+  if (col.field.includes('Temp')) return (v * 9/5) + 32;
+  if (col.field.includes('Press')) return v * 0.02953;
+  return v * col.conversionFactor;
+}
+
+function getTableColDisplay(col) {
+  if (currentUnitSystem === 'metric') return { unit: col.unit, decimals: col.decimals };
+  if (col.field.includes('Wind')) return { unit: 'MPH', decimals: 1 };
+  if (col.field.includes('Temp')) return { unit: '°F', decimals: 1 };
+  if (col.field.includes('Press')) return { unit: 'inHg', decimals: 2 };
+  return { unit: col.unit, decimals: col.decimals };
+}
+
+function toggleUnits() {
+  currentUnitSystem = (currentUnitSystem === 'metric') ? 'imperial' : 'metric';
+  if (typeof setCookie === 'function') setCookie('unitSystem', currentUnitSystem, 365);
+  applyUnitLabelsToUI();
+  generatePlots();
+  generateTableHeaders();
+  if (window.lastNowData) updateCurrentReadings(window.lastNowData);
+  if (window.lastDaysData) renderDays(window.lastDaysData);
+  PLOT_KEYS.forEach(reRenderPlot);
+}
+
+function applyUnitLabelsToUI() {
+  const btn = document.getElementById('unit_toggle_btn') || Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Metric') || b.textContent.includes('Imperial'));
+  if (btn) btn.textContent = currentUnitSystem === 'metric' ? 'Metric ☾' : 'Imperial ☀';
+
+  const map = currentUnitSystem === 'metric'
+    ? [['MPH', 'km/h'], ['°F', '°C'], ['inHg', 'hPa']]
+    : [['km/h', 'MPH'], ['°C', '°F'], ['hPa', 'inHg']];
+
+  document.querySelectorAll('div, span, b, strong, h1, h2, h3, h4, label, th, td').forEach(el => {
+    if (el.closest('#cpu_temp_pill')) return;
+    if (el.children.length === 0 && el.textContent) {
+      let t = el.textContent;
+      map.forEach(([from, to]) => {
+        if (t.includes(from)) t = t.split(from).join(to);
+      });
+      if (t !== el.textContent) el.textContent = t;
+    }
+  });
+}
+
+
+// Nice-number axis rounding (multiples of 1, 2, 2.5, 5, 10, 50, 100...)
+function computeNiceDomain(rawMin, rawMax, targetTicks = 4) {
+  if (!isFinite(rawMin) || !isFinite(rawMax)) return { min: 0, max: 1, step: 0.25, ticks: [0, 0.25, 0.5, 0.75, 1] };
+  if (Math.abs(rawMax - rawMin) < 1e-4) {
+    rawMin -= 1;
+    rawMax += 1;
+  }
+  const range = rawMax - rawMin;
+  const roughStep = range / targetTicks;
+  const mag = Math.pow(10, Math.floor(Math.log10(roughStep)));
+  const norm = roughStep / mag;
+  let niceNorm = 1;
+  if (norm <= 1.0) niceNorm = 1;
+  else if (norm <= 2.0) niceNorm = 2;
+  else if (norm <= 2.5) niceNorm = 2.5;
+  else if (norm <= 5.0) niceNorm = 5;
+  else niceNorm = 10;
+
+  const step = niceNorm * mag;
+  const niceMin = Math.floor(rawMin / step) * step;
+  const niceMax = Math.ceil(rawMax / step) * step;
+  const ticks = [];
+  for (let v = niceMax; v >= niceMin - step * 0.001; v -= step) {
+    ticks.push(Math.abs(v) < 1e-9 ? 0 : v);
+  }
+  return { min: niceMin, max: niceMax, step, ticks };
+}
+
+// ==================== SVG WIND COMPASS ====================
+function renderWindCompass(liveDirDeg, liveSpeedMs, buckets) {
+  const dirTextEl = document.getElementById('wind_dir') || Array.from(document.querySelectorAll('*')).find(el => el.children.length === 0 && el.textContent.trim().endsWith('°'));
+  if (dirTextEl) {
+    dirTextEl.textContent = (liveDirDeg !== null && liveDirDeg !== undefined && isFinite(liveDirDeg)) ? `${Math.round(liveDirDeg)}°` : '--°';
+  }
+
+  const compassEl = document.getElementById('wind_compass_svg') || Array.from(document.querySelectorAll('svg')).find(s => s.textContent.includes('N') && s.textContent.includes('W'));
+  if (!compassEl) return;
+
+  const vb = (compassEl.viewBox && compassEl.viewBox.baseVal && compassEl.viewBox.baseVal.width > 0)
+    ? compassEl.viewBox.baseVal : { width: 100, height: 100 };
+  const cx = vb.width / 2, cy = vb.height / 2, r = Math.min(cx, cy) * 0.68;
+
+  // Hide any static arrow elements (even if nested inside a <g>) except outer dial circles & N/E/S/W text
+  compassEl.querySelectorAll('line, polygon, path').forEach(el => {
+    if (!el.closest('#compass_vectors_layer')) el.style.display = 'none';
+  });
+
+  const oldLayer = compassEl.querySelector('#compass_vectors_layer');
+  if (oldLayer) oldLayer.remove();
+
+  const ns = 'http:' + '//www.w3.org/2000/svg';
+  const g = document.createElementNS(ns, 'g');
+  g.setAttribute('id', 'compass_vectors_layer');
+
+  if (Array.isArray(buckets) && buckets.length > 0) {
+    const recent = buckets.filter(b => isFinite(b.windDir) && isFinite(b.avgWind) && b.avgWind > 0.05).slice(-60);
+    const maxSpd = Math.max(liveSpeedMs || 0, ...recent.map(b => b.avgWind), 1.0);
+    recent.forEach((b, idx) => {
+      const rad = (b.windDir - 90) * Math.PI / 180;
+      const scale = Math.min(1.0, Math.max(0.25, b.avgWind / maxSpd));
+      const len = (r - 3) * scale;
+      const line = document.createElementNS(ns, 'line');
+      line.setAttribute('x1', cx); line.setAttribute('y1', cy);
+      line.setAttribute('x2', (cx + Math.cos(rad) * len).toFixed(1));
+      line.setAttribute('y2', (cy + Math.sin(rad) * len).toFixed(1));
+      line.setAttribute('stroke', '#0275d8');
+      line.setAttribute('stroke-opacity', (0.18 + 0.27 * (idx / recent.length)).toFixed(2));
+      line.setAttribute('stroke-width', '2');
+      line.setAttribute('stroke-linecap', 'round');
+      g.appendChild(line);
+    });
+  }
+
+  if (liveDirDeg !== null && liveDirDeg !== undefined && isFinite(liveDirDeg)) {
+    const rad = (liveDirDeg - 90) * Math.PI / 180;
+    const x2 = cx + Math.cos(rad) * (r - 1);
+    const y2 = cy + Math.sin(rad) * (r - 1);
+    const head = Math.max(5, r * 0.22);
+    const hx1 = x2 + Math.cos(rad + Math.PI * 0.8) * head, hy1 = y2 + Math.sin(rad + Math.PI * 0.8) * head;
+    const hx2 = x2 + Math.cos(rad - Math.PI * 0.8) * head, hy2 = y2 + Math.sin(rad - Math.PI * 0.8) * head;
+
+    const shaft = document.createElementNS(ns, 'line');
+    shaft.setAttribute('x1', cx); shaft.setAttribute('y1', cy);
+    shaft.setAttribute('x2', x2.toFixed(1)); shaft.setAttribute('y2', y2.toFixed(1));
+    shaft.setAttribute('stroke', '#d9534f'); shaft.setAttribute('stroke-width', '2.5');
+    shaft.setAttribute('stroke-linecap', 'round');
+
+    const tip = document.createElementNS(ns, 'polygon');
+    tip.setAttribute('points', `${x2.toFixed(1)},${y2.toFixed(1)} ${hx1.toFixed(1)},${hy1.toFixed(1)} ${hx2.toFixed(1)},${hy2.toFixed(1)}`);
+    tip.setAttribute('fill', '#d9534f');
+
+    const hub = document.createElementNS(ns, 'circle');
+    hub.setAttribute('cx', cx); hub.setAttribute('cy', cy); hub.setAttribute('r', '2.5');
+    hub.setAttribute('fill', '#d9534f');
+
+    g.append(shaft, tip, hub);
+  }
+  compassEl.appendChild(g);
+}
+
 // Configuration loaded from /api/config
 let CONFIG = null;
 let PLOT_KEYS = [];
@@ -219,7 +394,7 @@ function generatePlots() {
     });
 
     div.innerHTML = `
-      <div class="muted">${plot.title} (${plot.unit})</div>
+      <div class="muted">${plot.title} (${getPlotUnit(plot.id) || plot.unit})</div>
       <svg viewBox="0 0 600 140" preserveAspectRatio="none"
            onmousemove="plotMouseMove('${plot.id}', event)"
            onmouseleave="plotMouseLeave('${plot.id}')"
@@ -306,7 +481,8 @@ function generateTableHeaders() {
   let row3 = '<tr>';
   for (let i = 1; i < CONFIG.tableColumns.length; i++) {
     const col = CONFIG.tableColumns[i];
-    const unitText = col.unit ? `(${col.unit})` : '';
+    const disp = getTableColDisplay(col);
+    const unitText = disp.unit ? `(${disp.unit})` : '';
     const bgClass = col.bgColor ? ' class="table-alt-bg"' : '';
     row3 += `<th${bgClass}>${unitText}</th>`;
   }
@@ -400,8 +576,7 @@ function computeDomain(values, fields){
     min = 0;
     max = 1;
   }
-  if (Math.abs(max - min) < 1e-3) max = min + 1.0;
-  return {min, max};
+  return computeNiceDomain(min, max, 4);
 }
 
 function computeTimeDomain(values){
@@ -515,21 +690,24 @@ function hoverPlot(key, evt){
     tooltipEl.appendChild(document.createTextNode(`PM1.0: ${isFinite(pm1) ? pm1.toFixed(1) : '--'} ${state.unit}`));
   } else if (key === "wind") {
     // Show wind with colored dots - convert m/s to km/h and show gust first
-    const windKmh = toKmh(best.vAvg);
-    const gustKmh = toKmh(best.vMax);
-    if (gustKmh !== null && gustKmh !== undefined && isFinite(gustKmh)) {
+    const windVal = convertPlotVal('wind', best.vAvg);
+    const gustVal = convertPlotVal('wind', best.vMax);
+    const uStr = getPlotUnit('wind');
+    if (gustVal !== null && gustVal !== undefined && isFinite(gustVal)) {
       tooltipEl.appendChild(document.createElement('br'));
       const gustDot = createColorDot('#f0ad4e');
       tooltipEl.appendChild(gustDot);
-      tooltipEl.appendChild(document.createTextNode(`Gust: ${gustKmh.toFixed(1)} ${state.unit}`));
+      tooltipEl.appendChild(document.createTextNode(`Gust: ${gustVal.toFixed(1)} ${uStr}`));
     }
     tooltipEl.appendChild(document.createElement('br'));
     const windDot = createColorDot('black');
     tooltipEl.appendChild(windDot);
-    tooltipEl.appendChild(document.createTextNode(`Wind: ${windKmh.toFixed(1)} ${state.unit}`));
+    tooltipEl.appendChild(document.createTextNode(`Wind: ${windVal.toFixed(1)} ${uStr}`));
   } else {
+    const dispVal = convertPlotVal(key, best.vAvg);
+    const dec = (key === 'press' && currentUnitSystem === 'imperial') ? 2 : 1;
     tooltipEl.appendChild(document.createElement('br'));
-    tooltipEl.appendChild(document.createTextNode(`${state.label}: ${best.vAvg.toFixed(1)} ${state.unit}`));
+    tooltipEl.appendChild(document.createTextNode(`${state.label}: ${dispVal.toFixed(dec)} ${getPlotUnit(key) || state.unit}`));
   }
   tooltipEl.style.display = "block";
 
@@ -556,10 +734,10 @@ function hoverPlot(key, evt){
     const spanY = domain.max - domain.min;
     if (spanY > 0 && isFinite(spanY)) {
       const yRange = dims.height - dims.padTop - dims.padBottom;
-      const normY = (best.vAvg - domain.min) / spanY;
+      const normY = (convertPlotVal(key, best.vAvg) - domain.min) / spanY;
       yPx = dims.height - dims.padBottom - normY * yRange;
       if (key === "wind" && best.vMax !== null && best.vMax !== undefined && isFinite(best.vMax)) {
-        const normYMax = (best.vMax - domain.min) / spanY;
+        const normYMax = (convertPlotVal('wind', best.vMax) - domain.min) / spanY;
         const yPxMax = dims.height - dims.padBottom - normYMax * yRange;
         setHoverDot("wind_max", xPx, yPxMax);
       } else if (key === "pm") {
@@ -955,17 +1133,15 @@ function renderAxis(axisId, domain, dims = chartDims){
   const scaleX = svg ? (svg.getBoundingClientRect().width / dims.width) : 1;
   const textScale = scaleX > 0 ? (1 / scaleX) : 1;
 
-  // Use integer formatting for pressure axis
-  const decimals = (axisId === "axis_press") ? 0 : 1;
-
+  const step = domain.step || ((domain.max - domain.min) / 4);
+  const decimals = step >= 1 ? 0 : (step >= 0.1 ? 1 : 2);
   const span = domain.max - domain.min;
-  const ticks = 4;
+  const tickValues = domain.ticks || [domain.max, domain.max - span*0.25, domain.max - span*0.5, domain.max - span*0.75, domain.min];
   const axisX = dims.padLeft - 12;
   const usableH = dims.height - dims.padTop - dims.padBottom;
   let html = `<line x1="${axisX}" y1="${dims.padTop}" x2="${axisX}" y2="${dims.height - dims.padBottom}" stroke-width="1"/>`;
-  for (let i=0; i<=ticks; i++){
-    const frac = i / ticks;
-    const value = domain.max - frac * span;
+  for (const value of tickValues){
+    const frac = span > 0 ? (domain.max - value) / span : 0;
     const y = dims.padTop + frac * usableH;
     html += `<line x1="${axisX}" y1="${y.toFixed(1)}" x2="${(axisX+6)}" y2="${y.toFixed(1)}" stroke-width="1"/>`;
     html += `<text x="${axisX - 4}" y="${(y + 3).toFixed(1)}" text-anchor="end" transform="scale(${textScale.toFixed(3)}, 1)" transform-origin="${axisX - 4} ${(y + 3).toFixed(1)}">${value.toFixed(decimals)}</text>`;
@@ -1095,7 +1271,8 @@ function renderSingleSeries(values, field, elemId, color, axisId, xAxisId){
 
   const displayDomain = (plotState[key] && plotState[key].zoomXDomain) ? plotState[key].zoomXDomain : xDomain;
 
-  const visibleData = displayDomain ? filtered.filter(v => {
+  const converted = filtered.map(v => Object.assign({}, v, { [field]: convertPlotVal(key, v[field]) }));
+  const visibleData = displayDomain ? converted.filter(v => {
     const e = v ? Number(v.startEpoch) : NaN;
     return isFinite(e) && e >= displayDomain.min && e <= displayDomain.max;
   }) : filtered;
@@ -1108,7 +1285,7 @@ function renderSingleSeries(values, field, elemId, color, axisId, xAxisId){
     const midnightId = xAxisId.replace('axis_x_', 'midnight_');
     renderMidnightLines(midnightId, displayDomain);
   }
-  renderPolyline(visibleData.length > 0 ? visibleData : filtered, field, elemId, domain, chartDims, color, displayDomain);
+  renderPolyline(visibleData.length > 0 ? visibleData : converted, field, elemId, domain, chartDims, color, displayDomain);
   if (plotState[key]) {
     plotState[key].series = filtered;
     plotState[key].xDomain = xDomain;
@@ -1135,8 +1312,8 @@ function renderWind(values){
   const valuesKm = filtered.map(v => {
     if (!v) return v;
     return Object.assign({}, v, {
-      avgWind: toKmh(v.avgWind),
-      maxWind: toKmh(v.maxWind)
+      avgWind: convertPlotVal('wind', v.avgWind),
+      maxWind: convertPlotVal('wind', v.maxWind)
     });
   });
   const xDomain = computeTimeDomain(valuesKm);
@@ -1197,10 +1374,11 @@ function renderPM(values){
   const xDomain = computeTimeDomain(filtered);
   const displayDomain = (plotState.pm && plotState.pm.zoomXDomain) ? plotState.pm.zoomXDomain : xDomain;
 
-  const visibleData = displayDomain ? filtered.filter(v => {
+  const converted = filtered.map(v => Object.assign({}, v, { [field]: convertPlotVal(key, v[field]) }));
+  const visibleData = displayDomain ? converted.filter(v => {
     const e = v ? Number(v.startEpoch) : NaN;
     return isFinite(e) && e >= displayDomain.min && e <= displayDomain.max;
-  }) : filtered;
+  }) : converted;
 
   const domain = computeDomain(visibleData.length > 0 ? visibleData : filtered, ["avgPM1", "avgPM25", "avgPM10"]);
   const hasValid = Number.isFinite(domain.min) && Number.isFinite(domain.max);
@@ -1222,8 +1400,8 @@ function renderPM(values){
   renderXAxis("axis_x_pm", displayDomain);
   renderMidnightLines("midnight_pm", displayDomain);
   renderPolyline(visibleData.length > 0 ? visibleData : filtered, "avgPM25", "line_pm", domain, chartDims, "#ff6600", displayDomain);
-  renderPolyline(visibleData.length > 0 ? visibleData : filtered, "avgPM10", "line_pm_pm10", domain, chartDims, "#996633", displayDomain);
-  renderPolyline(visibleData.length > 0 ? visibleData : filtered, "avgPM1", "line_pm_pm1", domain, chartDims, "#9966cc", displayDomain);
+  renderPolyline(visibleData.length > 0 ? visibleData : converted, "avgPM10", "line_pm_pm10", domain, chartDims, "#996633", displayDomain);
+  renderPolyline(visibleData.length > 0 ? visibleData : converted, "avgPM1", "line_pm_pm1", domain, chartDims, "#9966cc", displayDomain);
   if (plotState.pm) {
     plotState.pm.series = filtered;
     plotState.pm.xDomain = xDomain;
@@ -1231,6 +1409,7 @@ function renderPM(values){
 }
 
 function renderDays(days){
+  window.lastDaysData = days;
   const tb = document.getElementById("days");
   tb.innerHTML = "";
   for (const d of days){
@@ -1246,8 +1425,9 @@ function renderDays(days){
       } else {
         const value = d[col.field];
         if (value != null && isFinite(value)) {
-          const converted = value * col.conversionFactor;
-          td.textContent = converted.toFixed(col.decimals);
+          const disp = getTableColDisplay(col);
+          const converted = convertTableCol(col, value);
+          td.textContent = converted.toFixed(disp.decimals);
         } else {
           td.textContent = "--";
         }
@@ -1511,20 +1691,22 @@ async function rebootDevice(){
 }
 
 function updateCurrentReadings(now) {
-  const windKmh = toKmh(now.wind_ms);
-  document.getElementById("now").textContent = numOrDash(windKmh, 1);
+  window.lastNowData = now;
+  const windDisp = convertPlotVal('wind', now.wind_ms);
+  document.getElementById("now").textContent = numOrDash(windDisp, 1);
+  renderWindCompass(now.wind_dir, now.wind_ms, window.lastBucketsSeries || []);
   document.getElementById("pps").textContent = numOrDash(now.wind_pps, 1);
   document.getElementById("uptime").textContent = formatUptime(now.uptime_s);
   document.getElementById("tlocal").textContent = now.local_time || "--";
 
 #ifdef TEMP_SENSOR
-  document.getElementById("temp").textContent = numOrDash(now.temp_c, 1);
+  document.getElementById("temp").textContent = numOrDash(convertPlotVal("temp", now.temp_c), 1);
 #endif
 #ifdef HUMID_SENSOR
   document.getElementById("rh").textContent = numOrDash(now.hum_rh, 1);
 #endif
 #ifdef PRESS_SENSOR
-  document.getElementById("pres").textContent = numOrDash(now.press_hpa, 1);
+  document.getElementById("pres").textContent = numOrDash(convertPlotVal("press", now.press_hpa), currentUnitSystem === "imperial" ? 2 : 1);
 #endif
   // Sensor status pills with colors
   document.getElementById("bmeok").textContent = now.bme280_ok ? "OK" : "ERR";
@@ -1703,7 +1885,7 @@ async function slowTick() {
           startEpoch: b[0],
           avgWind: b[1],
           maxWind: b[2],
-          samples: b[3] || 0,
+          windDir: b[3],
           avgTempC: b[4],
           avgHumRH: b[5],
           avgPressHpa: b[6],
@@ -1713,6 +1895,7 @@ async function slowTick() {
         };
       });
 
+      window.lastBucketsSeries = series;
       // Filter to only show last 24 hours
       series = series.filter(b => b.startEpoch >= cutoff24h);
       debugLog('Filtered to last 24h', {count: series.length});
@@ -1765,6 +1948,13 @@ function combinedTick() {
 
     // Load saved zoom level from cookie
     loadZoomLevelFromCookie();
+    if (typeof getCookie === 'function') {
+      const savedUnit = getCookie('unitSystem');
+      if (savedUnit === 'imperial' || savedUnit === 'metric') currentUnitSystem = savedUnit;
+    }
+    const unitBtn = document.getElementById('unit_toggle_btn') || Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Metric') || b.textContent.includes('Imperial'));
+    if (unitBtn) unitBtn.onclick = toggleUnits;
+    applyUnitLabelsToUI();
     updateActiveZoomButton(currentZoomLevel);
     debugLog('Loaded zoom level', {hours: currentZoomLevel});
 
