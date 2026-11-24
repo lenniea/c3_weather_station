@@ -2,6 +2,8 @@
 #include "config.h"
 #include "wind_sensor.h"
 
+#define DEBUG   1
+
 //#define SIMULATE_WIND   200     // 5 pulses/sec
 
 #ifdef WIND_SENSOR
@@ -240,6 +242,10 @@ void setupWindPin(void) {
 
 void initWindSensor(void) {
 
+#ifdef DEBUG
+  Serial0.begin(57600, SERIAL_8N1, RX_PIN, TX_PIN);
+#endif
+
   // Initialize Wind Vane (direction) sensor
   initWindVane();
 
@@ -272,19 +278,29 @@ bool initWindVane(uint8_t i2cAddress) {
   }
 
   // Configure sensor for angle calculation using X and Y axes
-  sensor.setMagneticChannel(TMAG5273_XYX_ENABLE); // Enable X and Y channels
-  sensor.setAngleEn(TMAG5273_XY_ANGLE_CALCULATION); // Enable CORDIC calculation on XY
+  sensor.setMagneticChannel(TMAG5273_X_Y_Z_ENABLE); // Enable X, Y and Z channels
+  sensor.setAngleEn(TMAG5273_XZ_ANGLE_CALCULATION); // Enable CORDIC calculation on XZ
   
   // Set conversion averaging to smooth out noise (Optional but recommended)
   sensor.setConvAvg(TMAG5273_X32_CONVERSION);
-  
-  Serial.println("TMAG5273 Initialized successfully.");
+#ifdef DEBUG 
+  Serial0.println("TMAG5273 Initialized successfully.");
+#endif
   return true;
 }
 
 uint16_t getWindAngle(void) {
-  // Read the angle calculated by the internal hardware engine
+  // Read the angle calculated by the internal hardware CORDIC engine
+#ifdef DEBUG
+  float x = sensor.getXData();
+  float y = sensor.getYData();
+  float z = sensor.getZData();
+  float mag = sensor.getMagnitudeResult();
   float rawAngle = sensor.getAngleResult();
+  Serial0.printf("x=%f y=%f z=%f mag=%f angle=%f\n", x, y, z, mag, rawAngle);
+#else
+  float rawAngle = sensor.getAngleResult();
+#endif
 
   // Enforce 0-359 integer range
   int angleDegrees = (int) rawAngle;

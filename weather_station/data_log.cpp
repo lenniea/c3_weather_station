@@ -174,6 +174,14 @@ time_t floorToBucketBoundaryLocal(time_t nowEpoch) {
   return mktime(&tmLocal);
 }
 
+String fmtLocalTime(time_t t) {
+  struct tm tmLocal;
+  localtime_r(&t, &tmLocal);
+  char buf[32];
+  strftime(buf, sizeof(buf), "%H:%M", &tmLocal);
+  return String(buf);
+}
+
 String fmtLocal(time_t t) {
   struct tm tmLocal;
   localtime_r(&t, &tmLocal);
@@ -357,7 +365,7 @@ void logBucketToSD(const BucketSample& b) {
 #endif
 
   String header =
-    "datetime,epoch"
+    "time,epoch"
 #ifdef WIND_SENSOR
     ",wind_avg_ms,wind_max_ms,wind_dir"
 #endif
@@ -376,7 +384,7 @@ void logBucketToSD(const BucketSample& b) {
   ;
 
   String line =
-    fmtLocal(b.startEpoch) + "," +
+    fmtLocalTime(b.startEpoch) + "," +
     String((uint32_t)b.startEpoch)
 #ifdef WIND_SENSOR
     + "," + String(b.avgWind, 3)
@@ -479,7 +487,7 @@ void loadRecentBucketsFromSD(time_t nowEpoch) {
       String line = f.readStringUntil('\n');
       line.trim();
       if (!line.length()) continue;
-      if (line.startsWith("datetime")) continue;
+      if (line.startsWith("time")) continue;
 
       // Count actual columns
       int commaCount = 0;
@@ -804,7 +812,7 @@ void loadDaySummariesFromSD(time_t nowEpoch) {
       String line = f.readStringUntil('\n');
       line.trim();
       if (!line.length()) continue;
-      if (line.startsWith("datetime")) continue;
+      if (line.startsWith("time")) continue;
 
       // Count actual columns
       int commaCount = 0;

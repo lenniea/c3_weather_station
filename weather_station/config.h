@@ -1,6 +1,8 @@
 #pragma once
 
 // ==================== HARDWARE CONFIGURATION ====================
+#define RX_PIN          20
+#define TX_PIN          21
 
 #define WIND_SENSOR     1
 //#define BME280_SENSOR   1
